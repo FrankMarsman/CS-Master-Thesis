@@ -2,6 +2,9 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <sim2d.h>
+#include <ctime>
+#include <QVector>
 
 namespace Ui {
 class MainWindow;
@@ -12,8 +15,43 @@ class MainWindow : public QMainWindow
   Q_OBJECT
 
 public:
+  Sim2D * sim;
+  bool isRunning; // true if NextStep is called continuously
+
+  double simFPS; // how many times NextStep per sec
+
+  uint prevRunStep, curRunStep; // to comute net FPS
+  time_t simStepTimer;  // to comute net FPS
+  double netFPS; // fps of everything; nextstep, update screen etc
+
+  QVector <double> E_tot, E_pot, E_grav, E_kin;
+  QVector <double> tVec;
+
   explicit MainWindow(QWidget *parent = 0);
   ~MainWindow( );
+
+public slots:
+  void Run( );
+  void UpdateInfoText( ); // updates information on ui
+  void UpdateMeshImage( ); // prints mesh to ui
+  void UpdateSelectedVertices( );
+
+private slots:
+  void on_nextButton_clicked( );
+  void on_noiseButton_clicked( );
+
+  void on_initButton_clicked();
+
+  void on_MainTab_currentChanged(int index);
+
+  void on_addVButton_clicked();
+
+
+  void on_lockButton_clicked();
+
+  void on_resetImgButton_clicked();
+
+  void on_vNoiseButton_clicked();
 
 private:
   Ui::MainWindow *ui;
