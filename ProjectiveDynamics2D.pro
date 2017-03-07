@@ -23,10 +23,12 @@ INCLUDEPATH += "D:/Thesis TUD/Libraries/Eigen/eigen-eigen-26667be4f70b/eigen-eig
 SOURCES += main.cpp\
         mainwindow.cpp \
     auxvar2d.cpp \
-    sim2d.cpp
+    sim2d.cpp \
+    qcustomplot.cpp
 
 HEADERS  += mainwindow.h \
     auxvar2d.h \
-    sim2d.h
+    sim2d.h \
+    qcustomplot.h
 
 FORMS    += mainwindow.ui
