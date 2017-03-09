@@ -30,13 +30,13 @@
        <enum>QTabWidget::Rounded</enum>
       </property>
       <property name="currentIndex">
-       <number>3</number>
+       <number>2</number>
       </property>
       <widget class="QWidget" name="SimTab">
        <attribute name="title">
         <string>Sim</string>
        </attribute>
-       <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0,0,0,0,0,0,0,0,0">
+       <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0,0,0,0,0,0,0,0,0,0">
         <property name="sizeConstraint">
          <enum>QLayout::SetMaximumSize</enum>
         </property>
@@ -115,6 +115,36 @@
          </widget>
         </item>
         <item>
+         <layout class="QHBoxLayout" name="HANS">
+          <item>
+           <widget class="QCheckBox" name="timeLimitCheckBox">
+            <property name="text">
+             <string>Use time limit</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QDoubleSpinBox" name="maxTimeBox">
+            <property name="prefix">
+             <string>stop at </string>
+            </property>
+            <property name="suffix">
+             <string> s</string>
+            </property>
+            <property name="maximum">
+             <double>1000.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>0.010000000000000</double>
+            </property>
+            <property name="value">
+             <double>5.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
          <widget class="QDoubleSpinBox" name="hValSpinBox">
           <property name="prefix">
            <string>h = </string>
@@ -132,7 +162,7 @@
            <double>0.001000000000000</double>
           </property>
           <property name="value">
-           <double>0.020000000000000</double>
+           <double>0.001000000000000</double>
           </property>
          </widget>
         </item>
@@ -167,19 +197,45 @@
            <double>0.100000000000000</double>
           </property>
           <property name="value">
-           <double>5.000000000000000</double>
+           <double>30.000000000000000</double>
           </property>
          </widget>
         </item>
         <item>
-         <widget class="QCheckBox" name="gravBox">
-          <property name="text">
-           <string>Enable gravity</string>
-          </property>
-          <property name="checked">
-           <bool>false</bool>
-          </property>
-         </widget>
+         <layout class="QHBoxLayout" name="gravLAYOUT">
+          <item>
+           <widget class="QCheckBox" name="gravBox">
+            <property name="text">
+             <string>Enable gravity</string>
+            </property>
+            <property name="checked">
+             <bool>false</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QDoubleSpinBox" name="gValBox">
+            <property name="prefix">
+             <string>g = </string>
+            </property>
+            <property name="suffix">
+             <string> m/s²</string>
+            </property>
+            <property name="minimum">
+             <double>0.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>100.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>0.001000000000000</double>
+            </property>
+            <property name="value">
+             <double>1.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+         </layout>
         </item>
         <item>
          <widget class="QCheckBox" name="lltBox">
@@ -342,7 +398,7 @@ hasnds</string>
             <string>Draw edges</string>
            </property>
            <property name="checked">
-            <bool>false</bool>
+            <bool>true</bool>
            </property>
           </widget>
          </item>
@@ -430,6 +486,50 @@ hasnds</string>
          </widget>
         </item>
         <item>
+         <widget class="QDoubleSpinBox" name="meshMassBox">
+          <property name="prefix">
+           <string>Total mass of mesh: </string>
+          </property>
+          <property name="suffix">
+           <string> kg</string>
+          </property>
+          <property name="minimum">
+           <double>0.010000000000000</double>
+          </property>
+          <property name="maximum">
+           <double>1000.000000000000000</double>
+          </property>
+          <property name="singleStep">
+           <double>0.010000000000000</double>
+          </property>
+          <property name="value">
+           <double>1.000000000000000</double>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QDoubleSpinBox" name="meshSizeBox">
+          <property name="prefix">
+           <string>Size of mesh: </string>
+          </property>
+          <property name="suffix">
+           <string> m</string>
+          </property>
+          <property name="minimum">
+           <double>0.010000000000000</double>
+          </property>
+          <property name="maximum">
+           <double>100.000000000000000</double>
+          </property>
+          <property name="singleStep">
+           <double>0.010000000000000</double>
+          </property>
+          <property name="value">
+           <double>1.000000000000000</double>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QSpinBox" name="mBox">
           <property name="suffix">
            <string>²</string>
@@ -446,6 +546,58 @@ hasnds</string>
           <property name="value">
            <number>15</number>
           </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QCheckBox" name="diagSpringCheckBox">
+          <property name="text">
+           <string>Add diagonal springs</string>
+          </property>
+          <property name="checked">
+           <bool>true</bool>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="label_4">
+          <property name="text">
+           <string>Deformation to apply at initialization:</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="initActionBox">
+          <property name="currentText">
+           <string>Add twist velocity X,Y</string>
+          </property>
+          <property name="currentIndex">
+           <number>3</number>
+          </property>
+          <item>
+           <property name="text">
+            <string>Do nothing</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Lock bottom vertices</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Add twist velocity X</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Add twist velocity X,Y</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Add twist velocity X,Y and squeeze</string>
+           </property>
+          </item>
          </widget>
         </item>
         <item alignment="Qt::AlignTop">
@@ -661,6 +813,13 @@ hasnds</string>
          </widget>
         </item>
         <item>
+         <widget class="QPushButton" name="copyExpBut">
+          <property name="text">
+           <string>Copy plot to clipboard</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <spacer name="verticalSpacer_3">
           <property name="orientation">
            <enum>Qt::Vertical</enum>
@@ -680,7 +839,7 @@ hasnds</string>
     <item>
      <widget class="QTabWidget" name="tabWidget">
       <property name="currentIndex">
-       <number>1</number>
+       <number>0</number>
       </property>
       <widget class="QWidget" name="meshtab">
        <attribute name="title">
@@ -688,11 +847,30 @@ hasnds</string>
        </attribute>
        <layout class="QVBoxLayout" name="verticalLayout_8">
         <item>
+         <widget class="QPushButton" name="copyMeshImgButton">
+          <property name="maximumSize">
+           <size>
+            <width>200</width>
+            <height>16777215</height>
+           </size>
+          </property>
+          <property name="text">
+           <string>Copy image to clipboard</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QLabel" name="imgLabel">
           <property name="minimumSize">
            <size>
             <width>500</width>
             <height>500</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>800</width>
+            <height>800</height>
            </size>
           </property>
           <property name="frameShape">

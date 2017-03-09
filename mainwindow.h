@@ -29,6 +29,7 @@ public:
   QVector <double> tVec;
 
   // for experiment:
+  double SIM_MAX_RUNTIME;
   QVector <double> expVecX;
   QVector < QVector <double> > expVecYs; // all lines
   QVector <QString> yVecLabels; // for legend
@@ -42,6 +43,7 @@ public slots:
   void UpdateInfoText( ); // updates information on ui
   void UpdateMeshImage( ); // prints mesh to ui
   void UpdateSelectedVertices( );
+  void PerformInitDeform( );
 
   void UpdateStepPlot( );
 
@@ -72,6 +74,10 @@ private slots:
   void on_squeezeYButton_clicked();
 
   void on_expButton_clicked();
+
+  void on_copyExpBut_clicked();
+
+  void on_copyMeshImgButton_clicked();
 
 private:
   Ui::MainWindow *ui;

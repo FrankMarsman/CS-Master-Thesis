@@ -20,6 +20,9 @@
 #include <QWinTaskbarButton>
 #include <QWinTaskbarProgress>
 
+#include <QClipboard>
+#include <QPixmap>
+
 using namespace Eigen;
 using namespace std;
 
@@ -28,13 +31,12 @@ MainWindow::MainWindow(QWidget *parent) :
   ui(new Ui::MainWindow) {
   ui->setupUi(this);
 
-  uint N = 20;
-  this->sim = new Sim2D(N * N);
+  uint N = 8;
+  double l = ui->meshSizeBox->value( );
+  double mass = ui->meshMassBox->value( );
+  this->sim = new Sim2D(N * N, mass, l);
 
-  // lock bottom vertices
-  sim->SetSelectedVertices(0, 1, 0, (2.0 / N));
-  sim->AddLockedVertices( );
-  sim->selectedVertices.clear( );
+  ui->mBox->setValue(N);
 
   // make sure ui updates when settings change:
   QObject::connect(ui->aaBox, SIGNAL(toggled(bool)), SLOT(UpdateMeshImage( )));
@@ -47,6 +49,7 @@ MainWindow::MainWindow(QWidget *parent) :
   prevRunStep = 0;
   simStepTimer = clock( );
 
+  SIM_MAX_RUNTIME = 1e99; // default no max time
 
   // init pens for plots:
   this->yVecPens.push_back(QPen(Qt::blue));
@@ -55,7 +58,6 @@ MainWindow::MainWindow(QWidget *parent) :
   this->yVecPens.push_back(QPen(Qt::yellow));
   this->yVecPens.push_back(QPen(Qt::magenta));
 
-  ui->mBox->setValue(N);
 
   isRunning = true; // set to opposite what you want
 
@@ -65,7 +67,8 @@ MainWindow::MainWindow(QWidget *parent) :
   UpdateSelectedVertices( );
   UpdateMeshImage( );
 
-  QTimer::singleShot(100, this, SLOT(Run( )));
+  QTimer::singleShot(10, this, SLOT(on_initButton_clicked( )));
+  QTimer::singleShot(250, this, SLOT(Run( )));
 
   // maximize window:
   this->setWindowState(Qt::WindowMaximized);
@@ -90,7 +93,7 @@ void MainWindow::on_stepButton_clicked( ) {
   this->sim->iterationsPerStep = ui->nStepsSpinBox->value( );
   // gravity:
   bool enableGrav = ui->gravBox->isChecked( );
-  double g = (enableGrav)? 0.1 : 0;
+  double g = (enableGrav)? ui->gValBox->value( ) : 0;
   if (sim->gravAcc != g)
     sim->SetGravity(g);
 
@@ -120,11 +123,15 @@ void MainWindow::Run( ) {
 
   bool useLLT = ui->lltBox->isChecked( );
 
+  bool useTimeLimit = ui->timeLimitCheckBox->isChecked( );
+  if (useTimeLimit)
+    SIM_MAX_RUNTIME = ui->maxTimeBox->value( );
+
   if (isRunning) {
 
     // gravity:
     bool enableGrav = ui->gravBox->isChecked( );
-    double g = (enableGrav)? 0.1 : 0;
+    double g = (enableGrav)? ui->gValBox->value( ) : 0;
     if (sim->gravAcc != g)
       sim->SetGravity(g);
 
@@ -138,11 +145,15 @@ void MainWindow::Run( ) {
     time_t t = clock( );
 
     for (uint i = 0; i < numSteps; i++) {
-      if (isRunning == false) {
+      if (isRunning == false || (useTimeLimit && sim->timeInSim >= SIM_MAX_RUNTIME)) {
         numSteps = i;
+        // set isrunning to false:
+        isRunning = true;
+        on_nextButton_clicked( ); // this makes isRunning false
         break;
       } // if
-      this->sim->NextStep(useLLT);
+      else
+        this->sim->NextStep(useLLT);
     } // for
 
     // compute stats:
@@ -175,6 +186,9 @@ void MainWindow::Run( ) {
 
 
 void MainWindow::on_expButton_clicked( ) {
+  SIM_MAX_RUNTIME = 1;
+  ui->maxTimeBox->setValue(SIM_MAX_RUNTIME);
+  ui->timeLimitCheckBox->setChecked(true);
   this->RunExperiment( );
 } // on_expButton_clicked
 
@@ -182,26 +196,20 @@ void MainWindow::on_expButton_clicked( ) {
 uint expNum = 0;
 double startE;
 void MainWindow::RunExperiment( ) {
-  double TIJD = 5;
-  double minH = 0.01;
-  uint numPlots = 5; // how many lines
+  double minH = 0.0001;
+  uint numPlots = 3; // how many lines
 
-  if (expNum == 0 && isRunning == false && sim->timeInSim < TIJD) { // first time
-    qDebug( ) << "EERSTE KEER !!!";
+  QWinTaskbarButton *button = new QWinTaskbarButton(this);
+  button->setWindow(this->windowHandle( ));
+  QWinTaskbarProgress *progress = button->progress( );
+
+  if (expNum == 0 && isRunning == false && sim->timeInSim < SIM_MAX_RUNTIME) { // first time
+    if (expVecYs.size( ) > 0) { // not REAL first time
+      ui->mBox->setValue(ui->mBox->value( ) * 2);
+    } // if
     this->on_initButton_clicked( );
-    sim->SqueezeX(0.95);
-    sim->SqueezeY(0.95);
 
-    // gravity:
-    bool enableGrav = ui->gravBox->isChecked( );
-    double g = (enableGrav)? 0.1 : 0;
-    if (sim->gravAcc != g)
-      sim->SetGravity(g);
-
-    // spring constant:
-    double C = ui->sfBox->value( ); // spring force constant
-    if (sim->springForceConstant != C)
-      sim->SetSpringForceConstant(C);
+    qDebug( ) << "EERSTE KEER !!! m =" << sim->m;
 
     ui->hValSpinBox->setValue(1);
     this->sim->h = ui->hValSpinBox->value( );
@@ -209,18 +217,25 @@ void MainWindow::RunExperiment( ) {
     startE = sim->GetTotEnergy( );
 
     // add new line:
-    this->yVecLabels.push_back("#V = " + QString::number(sim->m));
+    this->yVecLabels.push_back("#V = " + QString::number(sim->m) + ", E₀ = " + QString::number(startE, 'g', 2) + "J");
     QVector <double> newYVec;
+
+    if (expVecYs.size( ) > 0) { // not first vector, so make same size
+      for (int i = 0; i < expVecYs[0].size( ); i++)
+        newYVec.push_back(0);
+    } // if
+
     this->expVecYs.push_back(newYVec);
 
-    ui->mBox->setValue(ui->mBox->value( ) + 5);
+    progress->setVisible(true);
+    progress->setValue(0);
 
     isRunning = true;
     QTimer::singleShot(10, this, SLOT(RunExperiment( )));
     return;
   } // if
 
-  if (sim->timeInSim >= TIJD) {
+  if (sim->timeInSim >= SIM_MAX_RUNTIME) {
     if (isRunning) {
       isRunning = false;
       QTimer::singleShot(250, this, SLOT(RunExperiment( )));
@@ -229,12 +244,16 @@ void MainWindow::RunExperiment( ) {
 
     double curE = sim->GetTotEnergy( );
 
-    this->expVecYs[expVecYs.size( ) - 1].push_back((curE / startE));
-    if (expVecYs.size( ) == 1)
-      this->expVecX.push_back(log10(ui->hValSpinBox->value( )));
+    if (expVecYs.size( ) == 1) {
+      this->expVecX.push_back(-log10(ui->hValSpinBox->value( )));
+      this->expVecYs[expVecYs.size( ) - 1].push_back((curE / startE));
+    } // if
+    else { // yvec is already filled, so set value instead of add
+      this->expVecYs[expVecYs.size( ) - 1][expNum] = ((curE / startE));
+    } // else
 
     qDebug( ) << "New datapoint added! :" << expVecX.back( ) << " " << expVecYs[expVecYs.size( ) - 1].back( )
-              << ", startE =" << startE << ", curE =" << curE;
+              << ", startE =" << startE << ", curE =" << curE << "simTime =" << sim->timeInSim;
 
     // PLOT:
     QCustomPlot * customPlot = ui->expPlot;
@@ -243,7 +262,7 @@ void MainWindow::RunExperiment( ) {
       customPlot->plotLayout()->insertRow(0);
       customPlot->plotLayout()->addElement(0, 0,
                                            new QCPTextElement(customPlot,
-                                           "Energy left after " + QString::number(TIJD) + " seconds, \n#iterations = " + QString::number(sim->iterationsPerStep),
+                                           "Energy left after " + QString::number(SIM_MAX_RUNTIME) + " seconds, \n#iterations = " + QString::number(sim->iterationsPerStep),
                                                               QFont("sans", 12, QFont::Bold)));
     } // if
 
@@ -251,9 +270,9 @@ void MainWindow::RunExperiment( ) {
 
     customPlot->setAntialiasedElements(QCP::aePlottables);
 
-    // enable legend and position at top right
+    // enable legend and position at bottom right
     customPlot->legend->setVisible(true);
-    customPlot->axisRect( )->insetLayout( )->setInsetAlignment(0, Qt::AlignRight|Qt::AlignTop);
+    customPlot->axisRect( )->insetLayout( )->setInsetAlignment(0, Qt::AlignLeft|Qt::AlignTop);
 
 
     uint nPlots = this->expVecYs.size( );
@@ -266,31 +285,19 @@ void MainWindow::RunExperiment( ) {
       customPlot->graph(i)->setScatterStyle(QCPScatterStyle(QCPScatterStyle::ssDisc, 5));
     } // for
 
-    customPlot->xAxis->setLabel("log10 of h [s]");
+    customPlot->xAxis->setLabel("log10(1/h) [s]");
     customPlot->yAxis->setLabel("Fraction of energy left");
-    customPlot->xAxis->setRange(log10(minH), 0);
+    customPlot->xAxis->setRange(0, -log10(minH));
     customPlot->yAxis->setRange(0, 1);
 
     customPlot->replot( );
 
     // reset mesh
     this->on_initButton_clicked( );
-    sim->SqueezeX(0.95);
-    sim->SqueezeY(0.95);
-
-    // gravity:
-    bool enableGrav = ui->gravBox->isChecked( );
-    double g = (enableGrav)? 0.1 : 0;
-    if (sim->gravAcc != g)
-      sim->SetGravity(g);
-
-    // spring constant:
-    double C = ui->sfBox->value( ); // spring force constant
-    if (sim->springForceConstant != C)
-      sim->SetSpringForceConstant(C);
 
     double lastH = ui->hValSpinBox->value( );
     double newH = ((expNum+1) % 3 == 0)? lastH / 2.5 : lastH / 2;
+    //double newH = (expNum % 2 == 0)? lastH / 2 : lastH / 5;
     ui->hValSpinBox->setValue(newH);
 
     qDebug( ) << "Changed h value to" << newH << "=" << ui->hValSpinBox->value( );
@@ -300,6 +307,8 @@ void MainWindow::RunExperiment( ) {
     if (ui->hValSpinBox->value( ) < minH) { // reset and go to next plot
       qDebug( ) << "< minH, so continue, nPlots =" << nPlots;
       expNum = 0;
+      progress->setVisible(false);
+      progress->setValue(0);
       if (nPlots < numPlots)
         QTimer::singleShot(100, this, SLOT(RunExperiment( )));
       return;
@@ -310,11 +319,8 @@ void MainWindow::RunExperiment( ) {
     qDebug( ) << "Expnum:" << expNum << ", startE =" << startE;
   } // if
 
-  QWinTaskbarButton *button = new QWinTaskbarButton(this);
-  button->setWindow(this->windowHandle( ));
-  QWinTaskbarProgress *progress = button->progress( );
   progress->setVisible(true);
-  progress->setValue(100 * this->sim->timeInSim / TIJD);
+  progress->setValue(100 * this->sim->timeInSim / SIM_MAX_RUNTIME);
 
   if (expNum < 4) // act fast, because sim is fast
     QTimer::singleShot(1, this, SLOT(RunExperiment( )));
@@ -411,6 +417,8 @@ void MainWindow::UpdateSelectedVertices( ) {
   this->sim->SetSelectedVertices(x1, x2, 1.0 - y1, 1.0 - y2);
   UpdateMeshImage( );
 } // UpdateSelectedVertices
+
+
 
 // updates stepPlot in ui, containing energy loss
 // and displacement per step
@@ -528,15 +536,19 @@ void MainWindow::on_initButton_clicked( ) {
   } // if
 
   uint m = ui->mBox->value( );
+  double l = ui->meshSizeBox->value( );
+  double mass = ui->meshMassBox->value( );
+  bool useDSprings = ui->diagSpringCheckBox->isChecked( );
   m *= m; // make squared
 
   delete this->sim;
   this->sim = NULL;
-  this->sim = new Sim2D(m);
+  this->sim = new Sim2D(m, mass, l, useDSprings);
+  PerformInitDeform( );
 
   // gravity:
   bool enableGrav = ui->gravBox->isChecked( );
-  double g = (enableGrav)? 0.1 : 0;
+  double g = (enableGrav)? ui->gValBox->value( ) : 0;
   sim->SetGravity(g);
 
   // spring constant:
@@ -553,16 +565,75 @@ void MainWindow::on_initButton_clicked( ) {
   this->E_kin.clear( );
   this->E_tot.clear( );
 
-//  this->expVecX.clear( );
-//  this->expVecY.clear( );
-
   UpdateSelectedVertices( );
   UpdateMeshImage( );
+
+  ui->simInfoLabel->setText(sim->GetInfoString( ));
 } // on_initButton_clicked
+
+// checks whether initial set of deformations
+// has to be done (ui.initActionBox)
+void MainWindow::PerformInitDeform( ) {
+  uint actionIndex = ui->initActionBox->currentIndex( );
+  uint N = sqrt(sim->m);
+  uint m = sim->m;
+  uint teller;
+
+  if (actionIndex == 0) // do nothing
+    return;
+
+  if (actionIndex == 1) { // lock bottom vertices
+    sim->lockedVertices.clear( );
+    for (uint i = 0; i < N; i++) // lock first N vertices
+      sim->lockedVertices.push_back(i);
+    sim->gravRefHeight += 1;
+  } // if
+
+  if (actionIndex == 2) { // add opposite x-velocity
+    teller = N * int(N / 4);
+    // add velocity to right for top:
+    sim->selectedVertices.clear( );
+    for (uint i = 0; i < teller; i++) // select top 25%
+      sim->selectedVertices.push_back(m - i - 1);
+    sim->AddVelocity(0.2, 0);
+    // add velocity to left for bottom:
+    sim->selectedVertices.clear( );
+    for (uint i = 0; i < teller; i++) // select top 25%
+      sim->selectedVertices.push_back(i);
+    sim->AddVelocity(-0.2, 0);
+  } // if
+
+  if (actionIndex == 3) { // add opposite x-velocity and opposite y-velocity
+    double speed = 0.2;
+    sim->SetSelectedVertices(0, 1, 0, 0.25);
+    sim->AddVelocity(speed, 0);
+    sim->SetSelectedVertices(0, 1, 0.75, 1);
+    sim->AddVelocity(-speed, 0);
+    sim->SetSelectedVertices(0, 0.25, 0, 1);
+    sim->AddVelocity(0, speed);
+    sim->SetSelectedVertices(0.75, 1, 0, 1);
+    sim->AddVelocity(0, -speed);
+  } // if
+
+  if (actionIndex == 4) { // same as 3, but with x and y squeeze
+    double speed = 0.2;
+    sim->SetSelectedVertices(0, 1, 0, 0.25);
+    sim->AddVelocity(speed, 0);
+    sim->SetSelectedVertices(0, 1, 0.75, 1);
+    sim->AddVelocity(-speed, 0);
+    sim->SetSelectedVertices(0, 0.25, 0, 1);
+    sim->AddVelocity(0, speed);
+    sim->SetSelectedVertices(0.75, 1, 0, 1);
+    sim->AddVelocity(0, -speed);
+    sim->SqueezeX(0.9);
+    sim->SqueezeY(0.9);
+  } // if
+} // PerformInitDeform
 
 // user selects different tab
 void MainWindow::on_MainTab_currentChanged(int index) {
-  qDebug( ) << "Tab changed to" << index;
+  if (index < 0)
+    qDebug( ) << "Tab changed to" << index;
   UpdateMeshImage( );
 } // on_MainTab_currentChanged
 
@@ -603,11 +674,34 @@ void MainWindow::on_vNoiseButton_clicked( ) {
 void MainWindow::on_squeezeXButton_clicked( ) {
   this->sim->SqueezeX( );
   UpdateMeshImage( );
+  ui->simInfoLabel->setText(sim->GetInfoString( ));
 } // on_squeezeXButton_clicked
 
 
 void MainWindow::on_squeezeYButton_clicked( ) {
   this->sim->SqueezeY( );
   UpdateMeshImage( );
+  ui->simInfoLabel->setText(sim->GetInfoString( ));
 } // on_squeezeYButton_clicked
+
+// copies content of expPlot to clipboard
+void MainWindow::on_copyExpBut_clicked( ) {
+  QPixmap pm = ui->expPlot->toPixmap(600, 450);
+  QApplication::clipboard( )->setPixmap(pm);
+} // on_copyExpBut_clicked
+
+
+// copies mesh image to clipboard
+void MainWindow::on_copyMeshImgButton_clicked( ) {
+  const QPixmap* pm = ui->imgLabel->pixmap( );
+  QApplication::clipboard( )->setPixmap(*pm);
+} // on_copyMeshImgButton_clicked
+
+
+
+
+
+
+
+
 

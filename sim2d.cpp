@@ -12,7 +12,9 @@
 #include <chrono>
 #include <omp.h>
 
-Sim2D::Sim2D(uint _m) {
+// inits mesh with given mass and size,
+// is [dSprings] is true, then mesh gets diagonal springs
+Sim2D::Sim2D(uint _m, double _meshMass, double _meshSize, bool dSprings) {
   this->h = 0.3;
   this->m = _m;
   this->simStep = 0;
@@ -22,6 +24,7 @@ Sim2D::Sim2D(uint _m) {
   this->timeInSim = 0;
   this->gravRefHeight = 0;
   this->minSpringLen = 1e99;
+  this->meshMass = _meshMass;
 
   this->q = VectorXd(2 * m);
   this->v = VectorXd::Zero(2 * m);
@@ -29,13 +32,14 @@ Sim2D::Sim2D(uint _m) {
 
   this->M = SparseMatrix <double>(2 * m, 2 * m);
   this->M.setIdentity( );
+  this->M = this->M * (meshMass / double(m));
   this->Minv = SparseMatrix <double>(2 * m, 2 * m);
 
   for (uint i = 0; i < 2 * m; i++) {
     Minv.coeffRef(i, i) = 1.0 / M.coeffRef(i, i);
   } // for
 
-  InitMesh_Square( ); // init edges and stuff
+  InitMesh_Square(_meshSize, dSprings); // init edges and stuff
   InitRestLen( ); // compute rest lengths
   InitPs( ); // init pVec
 } // Sim2D
@@ -211,8 +215,9 @@ QString Sim2D::GetInfoString( ) {
   return str;
 } // GetInfoString
 
-// arranges vertices in square grid
-void Sim2D::InitMesh_Square( ) {
+// arranges vertices in square grid, of which lengths of sides are p_meshSize
+// if [dSprings] is true, then mesh gets diagonal springs
+void Sim2D::InitMesh_Square(double _meshSize, bool dSprings) {
   uint N = sqrt(m);
   if (N * N != m) { // m not a square
     qDebug( ) << "Error in InitMesh! m not a square";
@@ -220,18 +225,22 @@ void Sim2D::InitMesh_Square( ) {
   } // if
 
   double x, y;
-  double size = N; // length of sides
+  double size = _meshSize; // length of sides
 
   for (uint i = 0; i < m; i++) {
-    x = size * (double(i % N) / double(N)) - 0.5 * size;
-    y = -size * (double(i / N) / double(N));
+    x = size * (double(i % N) / double(N-1)) - 0.5 * size;
+    y = -size * (double(int(i / (N))) / double(N-1)) + 0.5 * size;
 
     this->q(2 * i)     = x;
     this->q(2 * i + 1) = y;
   } // for
 
   // now init edges
-  this->E = MatrixXi(2 * N * (N - 1) + 2 * (N-1) * (N-1), 2);
+  uint nE = 2 * N * (N - 1); // number of edges
+  if (dSprings)
+    nE += 2 * (N-1) * (N-1); // add diagonals
+
+  this->E = MatrixXi(nE, 2);
   this->numEdges = 0;
 
   for (uint i = 0; i < m; i++) {
@@ -245,20 +254,22 @@ void Sim2D::InitMesh_Square( ) {
       E(numEdges, 1) = i + N;
       numEdges++;
     } // if
-    if (i + N + 1 < m && (i + N + 1) % N != 0) { // connect to vertex right below
-      E(numEdges, 0) = i;
-      E(numEdges, 1) = i + N + 1;
-      numEdges++;
-    } // if
-    if (i + N - 1 < m && i % N != 0) { // connect to vertex left below
-      E(numEdges, 0) = i;
-      E(numEdges, 1) = i + N - 1;
-      numEdges++;
+    if (dSprings) {
+      if (i + N + 1 < m && (i + N + 1) % N != 0) { // connect to vertex right below
+        E(numEdges, 0) = i;
+        E(numEdges, 1) = i + N + 1;
+        numEdges++;
+      } // if
+      if (i + N - 1 < m && i % N != 0) { // connect to vertex left below
+        E(numEdges, 0) = i;
+        E(numEdges, 1) = i + N - 1;
+        numEdges++;
+      } // if
     } // if
   } // for
 
-  if (numEdges != 2 * N * (N - 1) + 2 * (N-1) * (N-1)) { // m not a square
-    qDebug( ) << "Error in InitMesh! numEdges =" << numEdges << "!=" << 2 * N * (N - 1) + 2 * (N-1) * (N-1);
+  if (numEdges != nE) { // m not a square
+    qDebug( ) << "Error in InitMesh! numEdges =" << numEdges << "!=" << nE;
     return;
   } // if
 
@@ -443,6 +454,7 @@ void Sim2D::SetGravity(double g) {
     mass = this->M.coeff(2 * i, 2 * i);
     F(2 * i + 1) = mass * g;
   } // for
+  ResetLockedVertices(true);
 } // SetGravity
 
 
@@ -536,6 +548,8 @@ void Sim2D::NextStep(bool useLLT, bool doMeasures) {
   auto elapsed = std::chrono::high_resolution_clock::now( ) - start;
   long long microseconds;
 
+  ResetLockedVertices( ); // to make v and F zero for locked vertices
+
   VectorXd sn = this->q + (h * this->v) + ((h*h) * (Minv * F)); // estimate of new q
 
   for (uint step = 0; step < numSteps; step++) {
@@ -589,12 +603,7 @@ void Sim2D::NextStep(bool useLLT, bool doMeasures) {
 
   this->v = (1.0 / h) * (q - oldQ);
 
-  // set locked vertices velocity to zero
-  for (uint i = 0; i < lockedVertices.size( ); i++) {
-    index = lockedVertices[i];
-    v(2 * index) = 0;
-    v(2 * index + 1) = 0;
-  } // for
+  ResetLockedVertices(false);
 
   cur_qSolveTime /= numSteps;
   cur_rMatrixMakeTime /= numSteps;
@@ -612,6 +621,21 @@ void Sim2D::NextStep(bool useLLT, bool doMeasures) {
   timeInSim += h;
 } // NextStep
 
+// sets forces and velocity of locked vertices to 0,
+// if [forcesToo] is false, then forces are not reset
+void Sim2D::ResetLockedVertices(bool forcesToo) {
+  uint index;
+  for (uint i = 0; i < lockedVertices.size( ); i++) {
+    index = lockedVertices[i];
+    v(2 * index) = 0;
+    v(2 * index + 1) = 0;
+    if (forcesToo) {
+      F(2 * index) = 0;
+      F(2 * index + 1) = 0;
+    } // if
+  } // for
+} // ResetLockedVertices
+
 
 
 // initializes imgCenterX, imgCenterY and imgViewSize
@@ -620,15 +644,19 @@ void Sim2D::InitImgParams( ) {
   double minY = MinY( );
   double maxX = MaxX( );
   double maxY = MaxY( );
+
+//  qDebug( ) << "ImgParams, min/maxX =" << minX << maxX
+//            << "min/maxY =" << minY << maxY;
+
   double W = maxX - minX;
   double H = maxY - minY;
   double L = max(W, H);
 
   // add border
-  minX -= L / 4;
-  minY -= L / 4;
-  maxX += L / 4;
-  maxY += L / 4;
+  minX -= L / 10;
+  minY -= L / 10;
+  maxX += L / 10;
+  maxY += L / 10;
   W = maxX - minX;
   H = maxY - minY;
   L = max(W, H);
@@ -706,7 +734,6 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
   } // if
 
   if (DRAW_MODE == 1) { // color vertices by velocity draw mode
-    //qDebug( ) << "QImage drawmode = 1";
     double cH, cL, cS; // hsl values
     double valHans; // velocity value in [0 1]
 
@@ -714,33 +741,20 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
     double maxV = MaxV( );
     double vRange = maxV - minV;
 
-    //qDebug( ) << "QImage computed minmaxV:" << maxV << minV << vRange;
-
     if (fabs(vRange) < 1e-9) { // if maxV = minV
-      //qDebug() << "ashd";
       minV = 0;
       maxV = 1;
       vRange = 1;
-      //qDebug( ) << "QImage computed minmaxV:" << maxV << minV << vRange;
     } // if
 
-    //qDebug( ) << "loop start, m=" << m;
     for (uint i = 0; i < m; i++) {
-      //if (i == 0)
-        //qDebug( ) << "first iteration, vsize" << v.rows( );
 
       if (vRange == 0) {
         valHans = 0;
-       // qDebug( ) << "i:" << i << "val nul";
       }
       else {
-         //qDebug( ) << "i:" << i << "val nietnul, getv =" << GetV(i) << "vrange" << vRange;
-         //qDebug( ) << (GetV(i) - minV);
-         //qDebug( ) << (GetV(i) - minV) /vRange;
         valHans = (GetV(i) - minV) / vRange; // in [0 1]
       }
-      //if (i == 0)
-      //  qDebug( ) << "!!!!! vcal:" << valHans << "maxminrange" << maxV << minV << vRange << "CurV" << GetV(i);
 
       if (valHans < 0 || valHans > 1)
         valHans = 0;
@@ -748,9 +762,6 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
       cH = (1.0 - valHans) * 1.0;
       cS = 1.0;
       cL = valHans * 0.5;
-//
-      //if (i == 0)
-      //  qDebug( ) << "hsl:" << cH << cS << cL;
 
       if (cH < 0 || cH > 1.0)
         cH = 0.5;
@@ -758,9 +769,6 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
         cS = 0.5;
       if (cL < 0 || cL > 1.0)
         cL = 0.5;
-
-      //if (i == 0)
-      //  qDebug( ) << "hsl new:" << cH << cS << cL;
 
       QColor col;
       col.setHslF(cH, cS, cL);
@@ -821,6 +829,7 @@ void Sim2D::AddLockedVertices( ) {
   for (uint i = 0; i < selectedVertices.size( ); i++)
     lockedVertices.push_back(selectedVertices[i]);
 } // AddLockedVertices
+
 
 
 

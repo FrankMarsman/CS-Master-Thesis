@@ -24,6 +24,8 @@ public:
   uint iterationsPerStep; // number of local/global iterations per step
   uint simStep; // how many steps computed
 
+  double meshMass; // total mass of all vertices
+
   double timeInSim; // how many seconds have elapsed
 
   double h; // time step
@@ -87,7 +89,7 @@ public:
 
   QString GetInfoString( ); // string with info about sim
 
-  void InitMesh_Square( ); // arranges vertices in square grid
+  void InitMesh_Square(double _meshSize, bool dSprings); // arranges vertices in square grid
   void InitRestLen( );
   void InitPs( ); // initializes pVec
   void ComputePs( ); // computes auxilliary variables (updates pVec elements)
@@ -101,6 +103,7 @@ public:
 
   void SetSelectedVertices(double x1, double x2, double y1, double y2);
   void AddLockedVertices( );
+  void ResetLockedVertices(bool forcesToo = true); // sets forces and velocity of locked vertices to 0
 
   void InitImgParams( ); // initializes imgCenterX, imgCenterY and imgViewSize
 
@@ -117,7 +120,7 @@ public:
                   bool drawSelectedVertices = false, bool drawLockedVertices = false,
                   uint DRAW_MODE = 0);
 
-  Sim2D(uint _m);
+  Sim2D(uint _m, double _meshMass = 1, double _meshSize = 1, bool dSprings = true);
   ~Sim2D( );
 };
 
