@@ -41,6 +41,7 @@ public:
 
   // 'desired' positions of vertices
   double x1, y1, x2, y2;
+  double dx, dy; // desired dx and dy
 
   virtual void AddToPosVec(VectorXd & q);
 

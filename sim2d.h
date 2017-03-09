@@ -24,15 +24,20 @@ public:
   uint iterationsPerStep; // number of local/global iterations per step
   uint simStep; // how many steps computed
 
+  double timeInSim; // how many seconds have elapsed
+
   double h; // time step
   double springForceConstant; // [N/m] F_spring = -Cu (C is force constant)
-
-  bool doParallelPi, doParallelRmat; // if true, we use parallel computing
 
   // stats:
   double qSolveTime; // [ms] time to solve lMatrix * q = b
   double pSolveTime; // [ms] time to compute p_i's
   double rMatrixMakeTime; // [ms] time to construct rMatrix
+  double minSpringLen; // [m] smallest length of any spring ever
+
+  // stats for during NextStep
+  vector <double> STEP_disp; // total displacement after each iteration
+  vector <double> STEP_totDiffE; // energy loss t.o.v. previous NextStep
 
   VectorXd q; // position vector in R^2m
   VectorXd v; // velocity vector in R^2m
@@ -66,6 +71,9 @@ public:
   double MaxX( );
   double MaxY( );
 
+  double GetCenterOfMassY( ); // returns y-pos of COM
+  double GetCenterOfMassX( ); // returns x-pos of COM
+
   // velocity functions
   double GetV(int k); // returns velocity of vertex n
   double MaxV( ); // max velocity
@@ -74,7 +82,8 @@ public:
   // Energy functions:
   double GetKineticEnergy( ); // returns total kinetic energy of all vertices
   double GetSpringPotentialEnergy( ); // returns total potential energy of all potentials
-  double GetGravPotEnergy(double gravRefHeight = 3); // gravitational potential energy w.r.t. gravRefHeight
+  double GetGravPotEnergy( ); // gravitational potential energy w.r.t. gravRefHeight
+  double GetTotEnergy( ); // sum of E_kin, E_spring and E_grav
 
   QString GetInfoString( ); // string with info about sim
 
@@ -85,6 +94,8 @@ public:
   void InitLMatrix( );
 
   double gravAcc; // gravitational acceleration
+  double gravRefHeight; // measure Gravitational energy from this height
+
   void SetGravity(double g); // sets F with gravity and updates gravAcc
   void SetSpringForceConstant(double C); // updates springForceConstant (also in pVec)
 
@@ -97,9 +108,10 @@ public:
   void AddNoise(double strength = 0.025); // displaces selected vertices randomly
   void AddVNoise(double strength = 0.025); // adds random velocity to selected vertices
   void AddVelocity(double vx, double vy); // adds given velocity to selected vertices
+  void SqueezeX(double factor = 0.9); // squeezes mesh in x-direction by factor
+  void SqueezeY(double factor = 0.9); // squeezes mesh in y-direction by factor
 
-
-  void NextStep(bool useLLT = false); // compute next q
+  void NextStep(bool useLLT = false, bool doMeasures = false); // compute next q
 
   QImage ToQImage(uint SIZE, bool useAA = true, bool drawEdges = true,
                   bool drawSelectedVertices = false, bool drawLockedVertices = false,

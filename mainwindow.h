@@ -5,6 +5,7 @@
 #include <sim2d.h>
 #include <ctime>
 #include <QVector>
+#include <QPen>
 
 namespace Ui {
 class MainWindow;
@@ -27,6 +28,12 @@ public:
   QVector <double> E_tot, E_pot, E_grav, E_kin;
   QVector <double> tVec;
 
+  // for experiment:
+  QVector <double> expVecX;
+  QVector < QVector <double> > expVecYs; // all lines
+  QVector <QString> yVecLabels; // for legend
+  QVector <QPen> yVecPens; // pen for each line
+
   explicit MainWindow(QWidget *parent = 0);
   ~MainWindow( );
 
@@ -35,6 +42,10 @@ public slots:
   void UpdateInfoText( ); // updates information on ui
   void UpdateMeshImage( ); // prints mesh to ui
   void UpdateSelectedVertices( );
+
+  void UpdateStepPlot( );
+
+  void RunExperiment( );
 
 private slots:
   void on_nextButton_clicked( );
@@ -52,6 +63,15 @@ private slots:
   void on_resetImgButton_clicked();
 
   void on_vNoiseButton_clicked();
+
+  void on_stepButton_clicked();
+
+  void on_squeezeXButton_clicked();
+
+
+  void on_squeezeYButton_clicked();
+
+  void on_expButton_clicked();
 
 private:
   Ui::MainWindow *ui;

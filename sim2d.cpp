@@ -19,9 +19,9 @@ Sim2D::Sim2D(uint _m) {
   this->iterationsPerStep = 5;
   this->imgViewSize = 0;
   this->springForceConstant = 2.5;
-
-  this->doParallelPi = false;
-  this->doParallelRmat = false;
+  this->timeInSim = 0;
+  this->gravRefHeight = 0;
+  this->minSpringLen = 1e99;
 
   this->q = VectorXd(2 * m);
   this->v = VectorXd::Zero(2 * m);
@@ -80,6 +80,34 @@ double Sim2D::MaxY( ) {
       ans = q(2 * i + 1);
   return ans;
 } // MaxY
+
+// returns y-pos of COM; sum of y_i * M_i,
+// y-pos of node times mass of node
+double Sim2D::GetCenterOfMassY( ) {
+  double ans = 0;
+  double totMass = 0, mass;
+  for (uint i = 0; i < m; i++) {
+    mass = this->M.coeff(2 * i, 2 * i);
+    totMass += mass;
+    ans += q(2 * i + 1) * mass;
+  } // for
+
+  return ans / totMass;
+} // GetCenterOfMassY
+
+// returns x-pos of COM; sum of x_i * M_i,
+// x-pos of node times mass of node
+double Sim2D::GetCenterOfMassX( ) {
+  double ans = 0;
+  double totMass = 0, mass;
+  for (uint i = 0; i < m; i++) {
+    mass = this->M.coeff(2 * i, 2 * i);
+    totMass += mass;
+    ans += q(2 * i) * mass;
+  } // for
+
+  return ans / totMass;
+} // GetCenterOfMassX
 
 // returns velocity of vertex k
 double Sim2D::GetV(int k) {
@@ -144,17 +172,22 @@ double Sim2D::GetSpringPotentialEnergy( ) {
 } // GetSpringPotentialEnergy
 
 // returns total gravitational potential energy of all vertices
-double Sim2D::GetGravPotEnergy(double gravRefHeight) {
+double Sim2D::GetGravPotEnergy() {
   double height;
   double mass;
   double Epot = 0;
   for (uint i = 0; i < m; i++) {
-    height = gravRefHeight - this->q(2 * i + 1);
+    height = this->gravRefHeight - this->q(2 * i + 1);
     mass = this->M.coeff(2 * i, 2 * i);
     Epot += mass * height * this->gravAcc;
   } // for
   return Epot;
 } // GetGravPotEnergy
+
+// returns total energy of current state
+double Sim2D::GetTotEnergy( ) {
+  return GetGravPotEnergy( ) + GetSpringPotentialEnergy( ) + GetKineticEnergy( );
+} // GetTotEnergy
 
 // returns string with stats about sim;
 // various computation times
@@ -171,7 +204,9 @@ QString Sim2D::GetInfoString( ) {
   str += "Kinetic energy       : " + QString::number(Ekin, 'f', 3) + "\n";
   str += "Potential energy     : " + QString::number(Epot, 'f', 3) + "\n";
   str += "Gravitational energy : " + QString::number(Egrav, 'f', 3) + "\n";
-  str += "Total energy         : " + QString::number(Epot + Ekin + Egrav, 'f', 3) + "\n";
+  str += "Total energy         : " + QString::number(Epot + Ekin + Egrav, 'f', 3) + "\n\n";
+
+  str += "Closest spring dist  : " + QString::number(minSpringLen, 'f', 3) + "\n";
 
   return str;
 } // GetInfoString
@@ -227,12 +262,14 @@ void Sim2D::InitMesh_Square( ) {
     return;
   } // if
 
-  qDebug( ) << "Done with InitMesh_Square. size of q:" << q.rows( );
+  double yCOM = this->GetCenterOfMassY( );
+  this->gravRefHeight = yCOM;
+  //qDebug( ) << "Done with InitMesh_Square. size of q:" << q.rows( ) << ", yCOM:" << yCOM;
 } // InitMesh_Square
 
 // fills vector restLen with current length of edges
 void Sim2D::InitRestLen( ) {
-  qDebug( ) << "Starting InitRestLen... numEdges =" << numEdges;
+  //qDebug( ) << "Starting InitRestLen... numEdges =" << numEdges;
   uint v1, v2; // indices of vertices
   double x1, x2, y1, y2;
   double dx, dy;
@@ -250,12 +287,12 @@ void Sim2D::InitRestLen( ) {
     dy = y2 - y1;
     restLen.push_back(sqrt(dx*dx + dy*dy));
   } // for
-  qDebug( ) << "Finished InitRestLen... size =" << restLen.size( );
+  //qDebug( ) << "Finished InitRestLen... size =" << restLen.size( );
 } // InitRestLen
 
 
 void Sim2D::InitPs( ) {
-  qDebug( ) << "InitPs start...";
+  //qDebug( ) << "InitPs start...";
   pVec.clear( );
   uint v1, v2; // indices of vertices
   for (uint e = 0; e < numEdges; e++) {
@@ -264,7 +301,7 @@ void Sim2D::InitPs( ) {
     SpringPotential2D pot(v1, v2, restLen[e], springForceConstant);
     pVec.push_back(pot);
   } // for
-  qDebug( ) << "InitPs done... pVec.size =" << pVec.size( );
+  //qDebug( ) << "InitPs done... pVec.size =" << pVec.size( );
 } // InitPs
 
 // compute auxilliary variables and puts them in vector p
@@ -273,54 +310,33 @@ void Sim2D::ComputePs( ) {
   auto elapsed = std::chrono::high_resolution_clock::now( ) - start;
   long long microseconds;
 
-  if (doParallelPi == true) {
-    #pragma omp parallel for
-    for (uint i = 0; i < pVec.size( ); i++) {
-      SpringPotential2D & pot = pVec[i];
-      uint v1 = pot.v1;
-      uint v2 = pot.v2;
-      double x1 = q(v1 * 2);
-      double y1 = q(v1 * 2 + 1);
-      double x2 = q(v2 * 2);
-      double y2 = q(v2 * 2 + 1);
-      double dx = x2 - x1;
-      double dy = y2 - y1;
-      double l = sqrt(dx*dx + dy*dy);
-      double dl = l - pot.r0; // positive if stretched
+  for (auto & pot : pVec) {
+    uint v1 = pot.v1;
+    uint v2 = pot.v2;
+    double x1 = q(v1 * 2);
+    double y1 = q(v1 * 2 + 1);
+    double x2 = q(v2 * 2);
+    double y2 = q(v2 * 2 + 1);
+    double dx = x2 - x1;
+    double dy = y2 - y1;
+    double l = sqrt(dx*dx + dy*dy);
 
-      double tx = 0.5 * dl / l;
-      double ty = tx * dy;
-      tx *= dx; // faster
+    if (l < minSpringLen)
+      minSpringLen = l;
 
-      pot.x1 = x1 + tx;
-      pot.y1 = y1 + ty;
-      pot.x2 = x2 - tx;
-      pot.y2 = y2 - ty;
-    } // for
-  } // if
-  else {
-    for (auto & pot : pVec) {
-      uint v1 = pot.v1;
-      uint v2 = pot.v2;
-      double x1 = q(v1 * 2);
-      double y1 = q(v1 * 2 + 1);
-      double x2 = q(v2 * 2);
-      double y2 = q(v2 * 2 + 1);
-      double dx = x2 - x1;
-      double dy = y2 - y1;
-      double l = sqrt(dx*dx + dy*dy);
-      double dl = l - pot.r0; // positive if stretched
+    double fac;
+    if (l > 0) {
+      fac = pot.r0 / l;
+      pot.dx = fac * dx;
+      pot.dy = fac * dy;
+    } // if
+    else {
+      qDebug( ) << "l = 0 in ComputePs!";
+      pot.dx = pot.r0 / sqrt(2);
+      pot.dy = pot.r0 / sqrt(2);
+    } // else
+  } // for
 
-      double tx = 0.5 * dl / l;
-      double ty = tx * dy;
-      tx *= dx; // faster
-
-      pot.x1 = x1 + tx;
-      pot.y1 = y1 + ty;
-      pot.x2 = x2 - tx;
-      pot.y2 = y2 - ty;
-    } // for
-  } // else
 
   elapsed = std::chrono::high_resolution_clock::now( ) - start;
   microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count( );
@@ -396,6 +412,28 @@ void Sim2D::AddVelocity(double vx, double vy) {
   } // for
 } // AddVelocity
 
+// squeezes mesh in x-direction by factor
+void Sim2D::SqueezeX(double factor) {
+  double xCOM = GetCenterOfMassX( );
+  double x, dx;
+  for (uint i = 0; i < m; i++) {
+    x = this->q(2 * i);
+    dx = x - xCOM;
+    this->q(2 * i) = xCOM + dx * factor;
+  } // for
+} // SqueezeX
+
+// squeezes mesh in y-direction by factor
+void Sim2D::SqueezeY(double factor) {
+  double yCOM = GetCenterOfMassY( );
+  double y, dy;
+  for (uint i = 0; i < m; i++) {
+    y = this->q(2 * i + 1);
+    dy = y - yCOM;
+    this->q(2 * i + 1) = yCOM + dy * factor;
+  } // for
+} // SqueezeY
+
 // sets all y-components of forces in F to m*g
 void Sim2D::SetGravity(double g) {
   this->gravAcc = g;
@@ -420,23 +458,30 @@ void Sim2D::SetSpringForceConstant(double C) {
 
 // computes lMatrix and initializes solver
 void Sim2D::InitLMatrix( ) {
-  qDebug( ) << "Init lMatrix! h =" << h;
+  //qDebug( ) << "Init lMatrix! h =" << h;
 
   // compute (constant) lMatrix
   lMatrix = SparseMatrix<double> (2 * m, 2 * m); // left side
   uint v1, v2; // indices of vertices
-  qDebug( ) << "lMatrix initialized, now adding S S^T";
+  //qDebug( ) << "lMatrix initialized, now adding S S^T";
   for (uint e = 0; e < pVec.size( ); e++) {
     v1 = pVec[e].v1;
     v2 = pVec[e].v2;
 
+    // add w_i on diagonal, pos v1 and v2:
     lMatrix.coeffRef(2 * v1, 2 * v1) += 1 * pVec[e].w;
     lMatrix.coeffRef(2 * v1 + 1, 2 * v1 + 1) += 1 * pVec[e].w;
     lMatrix.coeffRef(2 * v2, 2 * v2) += 1 * pVec[e].w;
     lMatrix.coeffRef(2 * v2 + 1, 2 * v2 + 1) += 1 * pVec[e].w;
+
+    // add -w_i on non-diagonal
+    lMatrix.coeffRef(2 * v1, 2 * v2) -= 1 * pVec[e].w;
+    lMatrix.coeffRef(2 * v1 + 1, 2 * v2 + 1) -= 1 * pVec[e].w;
+    lMatrix.coeffRef(2 * v2, 2 * v1) -= 1 * pVec[e].w;
+    lMatrix.coeffRef(2 * v2 + 1, 2 * v1 + 1) -= 1 * pVec[e].w;
   } // for
 
-  qDebug( ) << "adding S S^T done, adding M/h^2";
+  //qDebug( ) << "adding S S^T done, adding M/h^2";
 
   if (h == 0)
     qDebug( ) << "Error in InitLMatrix, h = 0!";
@@ -446,12 +491,12 @@ void Sim2D::InitLMatrix( ) {
 
   time_t t = clock( );
   // init cholenskysolver:
-  qDebug( ) << "Done. now cholenskySolver.analyzePattern(lMatrix):";
+  //qDebug( ) << "Done. now cholenskySolver.analyzePattern(lMatrix):";
   this->cholenskySolver.analyzePattern(lMatrix);
-  qDebug( ) << "cholenskySolver.factorize(lMatrix):";
+  //qDebug( ) << "cholenskySolver.factorize(lMatrix):";
   this->cholenskySolver.factorize(lMatrix); // now solver is ready to solve [lMatrix * x = b]
   double elapsed = double(clock( ) - t) / CLOCKS_PER_SEC;
-  qDebug( ) << "Done with Cholensky decomp, comp time =" << 1000 * elapsed << "ms";
+  //qDebug( ) << "Done with Cholensky decomp, comp time =" << 1000 * elapsed << "ms";
 
   // init other solver
   this->cg.compute(lMatrix); // now solver is ready to solve [lMatrix * x = b]
@@ -461,8 +506,11 @@ void Sim2D::InitLMatrix( ) {
 
 
 // updates q and v by using local/global solve
-void Sim2D::NextStep(bool useLLT) {
+// if useLLT == true then the LLT solver is used
+// if doMeasures == true, then measurements are taken per iteration (takes time)
+void Sim2D::NextStep(bool useLLT, bool doMeasures) {
   VectorXd oldQ; // old positions
+  VectorXd prevQ; // compare positions between iterations
 
   if (simStep == 0)
     InitLMatrix( );
@@ -471,49 +519,38 @@ void Sim2D::NextStep(bool useLLT) {
   uint index;
 
   oldQ = this->q;
+  prevQ = this->q;
 
   double cur_qSolveTime = 0;
   double cur_rMatrixMakeTime = 0;
+  double oldE = 0;
+
+  if (doMeasures)
+    oldE = this->GetTotEnergy( );
+
+  this->STEP_disp.clear( );
+  this->STEP_totDiffE.clear( );
 
   // for measuring time
   auto start = std::chrono::high_resolution_clock::now( );
   auto elapsed = std::chrono::high_resolution_clock::now( ) - start;
   long long microseconds;
 
-  VectorXd sn = this->q + h * this->v + (h*h) * (Minv * F); // estimate of new q
+  VectorXd sn = this->q + (h * this->v) + ((h*h) * (Minv * F)); // estimate of new q
 
   for (uint step = 0; step < numSteps; step++) {
     // LOCAL: FIND pi's
     ComputePs( );
 
-
     // compute right:
     start = std::chrono::high_resolution_clock::now( );
     VectorXd rMatrix = VectorXd::Zero(2 * m); // right side
 
-    if (doParallelRmat) {
 
-      #pragma omp parallel
-      {
-        VectorXd sub_rMatrix = VectorXd::Zero(2 * m); // right side
+    for (uint i = 0; i < pVec.size( ); i++) {
+      pVec[i].AddToPosVec(rMatrix);
+    } // for
 
-        #pragma omp for
-        for (uint i = 0; i < pVec.size( ); i++) {
-          pVec[i].AddToPosVec(sub_rMatrix);
-        } // for
-
-        #pragma omp critical
-        {
-          rMatrix += sub_rMatrix;
-        } // #pragma omp critical
-      } // #pragma omp parallel
-
-    } // if
-    else {
-      for (uint i = 0; i < pVec.size( ); i++) {
-        pVec[i].AddToPosVec(rMatrix);
-      } // for
-    } // else
     rMatrix += (1.0 / (h*h)) * (this->M * sn);
 
     elapsed = std::chrono::high_resolution_clock::now( ) - start;
@@ -536,6 +573,16 @@ void Sim2D::NextStep(bool useLLT) {
       q(2 * index) = oldQ(2 * index);
       q(2 * index + 1) = oldQ(2 * index + 1);
     } // for
+
+    if (doMeasures) {
+      VectorXd qDiff = q - prevQ;
+      this->v = (1.0 / h) * (q - oldQ);
+      if (step > 0) {
+        this->STEP_disp.push_back(qDiff.norm( ) / sqrt(qDiff.rows( )));
+        this->STEP_totDiffE.push_back(fabs(GetTotEnergy( ) - oldE));
+      } // if
+      prevQ = q;
+    } // if
   } // for
 
 
@@ -553,8 +600,8 @@ void Sim2D::NextStep(bool useLLT) {
   cur_rMatrixMakeTime /= numSteps;
 
   if (simStep > 0) { // average over previous values
-    this->qSolveTime = 0.99 * this->qSolveTime + 0.01 * cur_qSolveTime;
-    this->rMatrixMakeTime = 0.99 * this->rMatrixMakeTime + 0.01 * cur_rMatrixMakeTime;
+    this->qSolveTime = 0.999 * this->qSolveTime + 0.001 * cur_qSolveTime;
+    this->rMatrixMakeTime = 0.999 * this->rMatrixMakeTime + 0.001 * cur_rMatrixMakeTime;
   } // if
   else {
     this->qSolveTime = cur_qSolveTime;
@@ -562,6 +609,7 @@ void Sim2D::NextStep(bool useLLT) {
   } // else
 
   simStep++;
+  timeInSim += h;
 } // NextStep
 
 
