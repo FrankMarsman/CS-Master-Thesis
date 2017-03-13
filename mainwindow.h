@@ -6,6 +6,7 @@
 #include <ctime>
 #include <QVector>
 #include <QPen>
+#include <QMouseEvent>
 
 namespace Ui {
 class MainWindow;
@@ -46,8 +47,13 @@ public slots:
   void PerformInitDeform( );
 
   void UpdateStepPlot( );
+  void UpdateFloor(bool redraw = true);
+  void UpdateImgParams( );
+  void UpdateMeshImageInfo( );
 
   void RunExperiment( );
+
+
 
 private slots:
   void on_nextButton_clicked( );
@@ -78,6 +84,12 @@ private slots:
   void on_copyExpBut_clicked();
 
   void on_copyMeshImgButton_clicked();
+
+  void on_meshTypeBox_currentIndexChanged(int index);
+
+  void on_chooseMeshFileButton_clicked();
+
+  void on_updateLMatImg_clicked();
 
 private:
   Ui::MainWindow *ui;

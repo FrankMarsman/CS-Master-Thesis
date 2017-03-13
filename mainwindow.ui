@@ -15,7 +15,7 @@
   </property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QHBoxLayout" name="horizontalLayout">
-    <item alignment="Qt::AlignTop">
+    <item>
      <widget class="QTabWidget" name="MainTab">
       <property name="maximumSize">
        <size>
@@ -30,7 +30,7 @@
        <enum>QTabWidget::Rounded</enum>
       </property>
       <property name="currentIndex">
-       <number>2</number>
+       <number>4</number>
       </property>
       <widget class="QWidget" name="SimTab">
        <attribute name="title">
@@ -85,7 +85,7 @@
               <number>9999</number>
              </property>
              <property name="value">
-              <number>50</number>
+              <number>10</number>
              </property>
             </widget>
            </item>
@@ -153,10 +153,10 @@
            <string> s</string>
           </property>
           <property name="decimals">
-           <number>5</number>
+           <number>6</number>
           </property>
           <property name="minimum">
-           <double>0.000010000000000</double>
+           <double>0.000001000000000</double>
           </property>
           <property name="singleStep">
            <double>0.001000000000000</double>
@@ -197,7 +197,7 @@
            <double>0.100000000000000</double>
           </property>
           <property name="value">
-           <double>30.000000000000000</double>
+           <double>100.000000000000000</double>
           </property>
          </widget>
         </item>
@@ -380,6 +380,11 @@ hasnds</string>
              <string>Velocity</string>
             </property>
            </item>
+           <item>
+            <property name="text">
+             <string>Spring stress</string>
+            </property>
+           </item>
           </widget>
          </item>
          <item>
@@ -479,6 +484,86 @@ hasnds</string>
        </attribute>
        <layout class="QVBoxLayout" name="verticalLayout_3">
         <item>
+         <layout class="QHBoxLayout" name="abc">
+          <item>
+           <widget class="QLabel" name="label_5">
+            <property name="text">
+             <string>Mesh type:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="meshTypeBox">
+            <item>
+             <property name="text">
+              <string>Square mesh</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Mesh from image</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="meshFileGroupBox">
+          <property name="title">
+           <string>Select mesh image</string>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_13">
+           <item>
+            <layout class="QHBoxLayout" name="horizontalLayout_7">
+             <item>
+              <widget class="QLabel" name="label_6">
+               <property name="text">
+                <string>file: </string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLineEdit" name="meshFileEdit"/>
+             </item>
+             <item>
+              <widget class="QPushButton" name="chooseMeshFileButton">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Minimum" vsizetype="Fixed">
+                 <horstretch>0</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="text">
+                <string>open...</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <widget class="QDoubleSpinBox" name="imgScaleBox">
+             <property name="prefix">
+              <string>scale: </string>
+             </property>
+             <property name="minimum">
+              <double>0.100000000000000</double>
+             </property>
+             <property name="maximum">
+              <double>10.000000000000000</double>
+             </property>
+             <property name="singleStep">
+              <double>0.100000000000000</double>
+             </property>
+             <property name="value">
+              <double>1.000000000000000</double>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
          <widget class="QPushButton" name="initButton">
           <property name="text">
            <string>Init Mesh</string>
@@ -503,7 +588,7 @@ hasnds</string>
            <double>0.010000000000000</double>
           </property>
           <property name="value">
-           <double>1.000000000000000</double>
+           <double>20.000000000000000</double>
           </property>
          </widget>
         </item>
@@ -600,7 +685,7 @@ hasnds</string>
           </item>
          </widget>
         </item>
-        <item alignment="Qt::AlignTop">
+        <item>
          <widget class="QGroupBox" name="groupBox_2">
           <property name="title">
            <string>Select vertices for abuse</string>
@@ -802,7 +887,7 @@ hasnds</string>
       </widget>
       <widget class="QWidget" name="tab_2">
        <attribute name="title">
-        <string>Experiments</string>
+        <string>Exp</string>
        </attribute>
        <layout class="QVBoxLayout" name="verticalLayout_10">
         <item>
@@ -834,10 +919,104 @@ hasnds</string>
         </item>
        </layout>
       </widget>
+      <widget class="QWidget" name="tab_4">
+       <attribute name="title">
+        <string>Floor</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="verticalLayout_14">
+        <item>
+         <layout class="QVBoxLayout" name="verticalLayout_11">
+          <item>
+           <widget class="QCheckBox" name="ffCheckBox">
+            <property name="text">
+             <string>Use floor</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QDoubleSpinBox" name="ffPosBox">
+            <property name="prefix">
+             <string>floor pos: </string>
+            </property>
+            <property name="suffix">
+             <string> m</string>
+            </property>
+            <property name="minimum">
+             <double>-100.000000000000000</double>
+            </property>
+            <property name="maximum">
+             <double>100.000000000000000</double>
+            </property>
+            <property name="singleStep">
+             <double>0.010000000000000</double>
+            </property>
+            <property name="value">
+             <double>0.600000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QDoubleSpinBox" name="ffDistBox">
+            <property name="prefix">
+             <string>min dist: </string>
+            </property>
+            <property name="suffix">
+             <string> m</string>
+            </property>
+            <property name="decimals">
+             <number>4</number>
+            </property>
+            <property name="singleStep">
+             <double>0.001000000000000</double>
+            </property>
+            <property name="value">
+             <double>0.010000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QDoubleSpinBox" name="ffStrengthBox">
+            <property name="prefix">
+             <string>force strength: </string>
+            </property>
+            <property name="suffix">
+             <string> N/m</string>
+            </property>
+            <property name="maximum">
+             <double>10000.000000000000000</double>
+            </property>
+            <property name="value">
+             <double>500.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="verticalSpacer_4">
+            <property name="orientation">
+             <enum>Qt::Vertical</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>20</width>
+              <height>40</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
      </widget>
     </item>
     <item>
      <widget class="QTabWidget" name="tabWidget">
+      <property name="layoutDirection">
+       <enum>Qt::LeftToRight</enum>
+      </property>
       <property name="currentIndex">
        <number>0</number>
       </property>
@@ -975,6 +1154,51 @@ background-color: rgb(255, 170, 0);</string>
            </widget>
           </item>
          </layout>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="tab_3">
+       <attribute name="title">
+        <string>lMatrix</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="verticalLayout_12">
+        <item>
+         <widget class="QPushButton" name="updateLMatImg">
+          <property name="maximumSize">
+           <size>
+            <width>200</width>
+            <height>16777215</height>
+           </size>
+          </property>
+          <property name="text">
+           <string>Show lMatrix image</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="lMatImgLabel">
+          <property name="minimumSize">
+           <size>
+            <width>500</width>
+            <height>500</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>800</width>
+            <height>800</height>
+           </size>
+          </property>
+          <property name="frameShape">
+           <enum>QFrame::Box</enum>
+          </property>
+          <property name="text">
+           <string>TextLabel</string>
+          </property>
+          <property name="alignment">
+           <set>Qt::AlignCenter</set>
+          </property>
+         </widget>
         </item>
        </layout>
       </widget>

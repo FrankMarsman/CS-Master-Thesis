@@ -22,6 +22,7 @@
 
 #include <QClipboard>
 #include <QPixmap>
+#include <QFileDialog>
 
 using namespace Eigen;
 using namespace std;
@@ -41,10 +42,25 @@ MainWindow::MainWindow(QWidget *parent) :
   // make sure ui updates when settings change:
   QObject::connect(ui->aaBox, SIGNAL(toggled(bool)), SLOT(UpdateMeshImage( )));
   QObject::connect(ui->drawEdgeBox, SIGNAL(toggled(bool)), SLOT(UpdateMeshImage( )));
+  QObject::connect(ui->drawModeBox, SIGNAL(currentIndexChanged(int)), SLOT(UpdateMeshImage( )));
+
   QObject::connect(ui->sX1Slider, SIGNAL(actionTriggered(int)), SLOT(UpdateSelectedVertices( )));
   QObject::connect(ui->sX2Slider, SIGNAL(actionTriggered(int)), SLOT(UpdateSelectedVertices( )));
   QObject::connect(ui->sY1Slider, SIGNAL(actionTriggered(int)), SLOT(UpdateSelectedVertices( )));
   QObject::connect(ui->sY2Slider, SIGNAL(actionTriggered(int)), SLOT(UpdateSelectedVertices( )));
+  // floor related controls:
+  QObject::connect(ui->ffDistBox, SIGNAL(valueChanged(double)), SLOT(UpdateFloor( )));
+  QObject::connect(ui->ffPosBox, SIGNAL(valueChanged(double)), SLOT(UpdateFloor( )));
+  QObject::connect(ui->ffStrengthBox, SIGNAL(valueChanged(double)), SLOT(UpdateFloor( )));
+  QObject::connect(ui->ffCheckBox, SIGNAL(toggled(bool)), SLOT(UpdateFloor( )));
+  // view related controls:
+  QObject::connect(ui->imgXBox, SIGNAL(valueChanged(double)), SLOT(UpdateImgParams( )));
+  QObject::connect(ui->imgYBox, SIGNAL(valueChanged(double)), SLOT(UpdateImgParams( )));
+  QObject::connect(ui->imgWBox, SIGNAL(valueChanged(double)), SLOT(UpdateImgParams( )));
+
+  QObject::connect(ui->imgScaleBox, SIGNAL(valueChanged(double)), SLOT(UpdateMeshImageInfo( )));
+
+
 
   prevRunStep = 0;
   simStepTimer = clock( );
@@ -63,6 +79,7 @@ MainWindow::MainWindow(QWidget *parent) :
 
   on_nextButton_clicked( );
   on_resetImgButton_clicked( );
+  on_meshTypeBox_currentIndexChanged(ui->meshTypeBox->currentIndex( ));
 
   UpdateSelectedVertices( );
   UpdateMeshImage( );
@@ -167,6 +184,8 @@ void MainWindow::Run( ) {
 
     if (isinf(simFPS))
       simFPS = 0;
+    if (isnan(simFPS))
+      simFPS = 0;
 
     if (double(clock( ) - simStepTimer) >= double(CLOCKS_PER_SEC)) {
       elapsed = double(clock( ) - simStepTimer) / CLOCKS_PER_SEC;
@@ -197,7 +216,7 @@ uint expNum = 0;
 double startE;
 void MainWindow::RunExperiment( ) {
   double minH = 0.0001;
-  uint numPlots = 3; // how many lines
+  uint numPlots = 5; // how many lines
 
   QWinTaskbarButton *button = new QWinTaskbarButton(this);
   button->setWindow(this->windowHandle( ));
@@ -205,19 +224,21 @@ void MainWindow::RunExperiment( ) {
 
   if (expNum == 0 && isRunning == false && sim->timeInSim < SIM_MAX_RUNTIME) { // first time
     if (expVecYs.size( ) > 0) { // not REAL first time
-      ui->mBox->setValue(ui->mBox->value( ) * 2);
+      //ui->mBox->setValue(ui->mBox->value( ) * 2);
+      ui->meshMassBox->setValue(ui->meshMassBox->value( ) * 4);
     } // if
     this->on_initButton_clicked( );
 
     qDebug( ) << "EERSTE KEER !!! m =" << sim->m;
 
-    ui->hValSpinBox->setValue(1);
+    ui->hValSpinBox->setValue(0.1);
     this->sim->h = ui->hValSpinBox->value( );
 
     startE = sim->GetTotEnergy( );
 
     // add new line:
-    this->yVecLabels.push_back("#V = " + QString::number(sim->m) + ", E₀ = " + QString::number(startE, 'g', 2) + "J");
+    //this->yVecLabels.push_back("#V = " + QString::number(sim->m) + ", E₀ = " + QString::number(startE, 'g', 2) + "J");
+    this->yVecLabels.push_back("M = " + QString::number(ui->meshMassBox->value( )) + "kg, E₀ = " + QString::number(startE, 'g', 2) + "J");
     QVector <double> newYVec;
 
     if (expVecYs.size( ) > 0) { // not first vector, so make same size
@@ -262,7 +283,7 @@ void MainWindow::RunExperiment( ) {
       customPlot->plotLayout()->insertRow(0);
       customPlot->plotLayout()->addElement(0, 0,
                                            new QCPTextElement(customPlot,
-                                           "Energy left after " + QString::number(SIM_MAX_RUNTIME) + " seconds, \n#iterations = " + QString::number(sim->iterationsPerStep),
+                                           "Energy left after " + QString::number(SIM_MAX_RUNTIME) + " seconds, \n#iterations = " + QString::number(sim->iterationsPerStep) + ", #V = " + QString::number(sim->m),
                                                               QFont("sans", 12, QFont::Bold)));
     } // if
 
@@ -327,6 +348,7 @@ void MainWindow::RunExperiment( ) {
   else
     QTimer::singleShot(100, this, SLOT(RunExperiment( )));
 } // RunExperiment
+
 
 void MainWindow::UpdateInfoText( ) {
   ui->fpsLabel->setText(QString::number(simFPS, 'f', 0));
@@ -403,7 +425,7 @@ void MainWindow::UpdateMeshImage( ) {
 
   //qDebug( ) << "UpdateMeshImage, DRAW_MODE =" << DRAW_MODE;
 
-  QImage img = sim->ToQImage(500, useAA, drawEdges, drawSelectedVertices, drawLockedVertices, DRAW_MODE);
+  QImage img = sim->ToQImage(700, useAA, drawEdges, drawSelectedVertices, drawLockedVertices, DRAW_MODE);
   ui->imgLabel->setPixmap(QPixmap::fromImage(img));
 } // UpdateMeshImage
 
@@ -480,6 +502,37 @@ void MainWindow::UpdateStepPlot( ) {
   customPlot->replot( );
 } // UpdateStepPlot
 
+// updates floor parameters and redraws mesh
+void MainWindow::UpdateFloor(bool redraw) {
+  bool enableFloor = ui->ffCheckBox->isChecked( );
+
+  double fPos = ui->ffPosBox->value( );
+  double fDist = ui->ffDistBox->value( );
+  double fStrength = ui->ffStrengthBox->value( );
+
+  sim->floorEnabled = enableFloor;
+  sim->floorC = fStrength;
+  sim->floorDist = fDist;
+  sim->floorHeight = fPos;
+  sim->gravRefHeight = fPos;
+
+  if (redraw)
+    UpdateMeshImage( );
+} // UpdateFloor
+
+
+// updates center of mesh image and size of view
+void MainWindow::UpdateImgParams( ) {
+  double viewSize = ui->imgWBox->value( );
+  double cx = ui->imgXBox->value( );
+  double cy = ui->imgYBox->value( );
+
+  sim->imgCenterX = cx;
+  sim->imgCenterY = cy;
+  sim->imgViewSize = viewSize;
+
+  UpdateMeshImage( );
+} // UpdateImgParams
 
 
 
@@ -543,7 +596,31 @@ void MainWindow::on_initButton_clicked( ) {
 
   delete this->sim;
   this->sim = NULL;
-  this->sim = new Sim2D(m, mass, l, useDSprings);
+
+  uint mType = ui->meshTypeBox->currentIndex( );
+
+  if (mType == 0) { // square mesh
+    this->sim = new Sim2D(m, mass, l, useDSprings);
+  } // if
+
+  if (mType == 1) { // mesh from image
+    QImage img;
+    QString str = ui->meshFileEdit->text( );
+    if (str.length( ) == 0) {
+      qDebug( ) << "Error! No file selected";
+      return;
+    } // if
+    bool r = img.load(str);
+    if (r == false) {
+      qDebug( ) << "Error! Image load failed";
+      return;
+    } // if
+    double sFac = ui->imgScaleBox->value( );
+    img = img.scaled(img.width( ) * sFac, img.height( ) * sFac);
+    this->sim = new Sim2D(img, mass, l, useDSprings);
+    ui->statusBar->showMessage("Mesh from image, m = " + QString::number(sim->m));
+  } // if
+
   PerformInitDeform( );
 
   // gravity:
@@ -565,8 +642,13 @@ void MainWindow::on_initButton_clicked( ) {
   this->E_kin.clear( );
   this->E_tot.clear( );
 
+  UpdateFloor(false);
   UpdateSelectedVertices( );
   UpdateMeshImage( );
+
+  ui->statusBar->showMessage("Done initializing mesh. m = " + QString::number(sim->m)
+                             + ", #springs = " + QString::number(sim->numEdges)
+                             + ", E = " + QString::number(sim->GetTotEnergy( )) + "J");
 
   ui->simInfoLabel->setText(sim->GetInfoString( ));
 } // on_initButton_clicked
@@ -697,9 +779,59 @@ void MainWindow::on_copyMeshImgButton_clicked( ) {
   QApplication::clipboard( )->setPixmap(*pm);
 } // on_copyMeshImgButton_clicked
 
+// mesh type changed, if mesh type is from image, then show
+// image selection box
+void MainWindow::on_meshTypeBox_currentIndexChanged(int index) {
+  if (index == 1)
+    ui->meshFileGroupBox->setVisible(true);
+  else
+    ui->meshFileGroupBox->setVisible(false);
+} // on_meshTypeBox_currentIndexChanged
 
+// opens dialog that let's user choose mesh file
+void MainWindow::on_chooseMeshFileButton_clicked( ) {
+  QString str = QFileDialog::getOpenFileName(
+        this,
+        tr("Open mesh image"), "",
+        tr("Image (*.*);;All Files (*)"));
+  ui->meshFileEdit->setText(str);
 
+  UpdateMeshImageInfo( );
+} // on_chooseMeshFileButton_clicked
 
+// computes info about mesh image
+void MainWindow::UpdateMeshImageInfo( ) {
+  QImage img;
+  QString str = ui->meshFileEdit->text( );
+  if (str.length( ) == 0) {
+    ui->statusBar->showMessage("Error! No file selected");
+    return;
+  } // if
+  bool r = img.load(str);
+  if (r == false) {
+    ui->statusBar->showMessage("Error! Image load failed");
+    return;
+  } // if
+  double sFac = ui->imgScaleBox->value( );
+  img = img.scaled(img.width( ) * sFac, img.height( ) * sFac);
+  uint imgW = img.width( ), imgH = img.height( );
+  QColor col;
+  uint m = 0;
+  // determine number of vertices [m]:
+  for (uint x = 1; x < imgW - 1; x++)
+    for (uint y = 1; y < imgH - 1; y++) {
+      col = img.pixel(x, y);
+      if (col.red( ) > 0) // non-black pixel
+        m++;
+    } // for
+  ui->statusBar->showMessage("Selected image contains " + QString::number(m) + " vertices");
+} // UpdateMeshImageInfo
+
+// shows image of constant system matrix
+void MainWindow::on_updateLMatImg_clicked( ) {
+  QImage img = sim->GetlMatrixImage( );
+  ui->lMatImgLabel->setPixmap(QPixmap::fromImage(img).scaled(500, 500));
+} // on_updateLMatImg_clicked
 
 
 

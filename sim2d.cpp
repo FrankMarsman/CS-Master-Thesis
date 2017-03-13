@@ -4,6 +4,8 @@
 #include <QDebug>
 #include <QImage>
 #include <math.h>
+#include <cmath>
+#include <algorithm>
 #include <QPainter>
 #include <stdlib.h>
 #include <QColor>
@@ -11,6 +13,9 @@
 #include <time.h>
 #include <chrono>
 #include <omp.h>
+#include <QRgb>
+#include <vector>
+#include <utility>
 
 // inits mesh with given mass and size,
 // is [dSprings] is true, then mesh gets diagonal springs
@@ -29,6 +34,8 @@ Sim2D::Sim2D(uint _m, double _meshMass, double _meshSize, bool dSprings) {
   this->q = VectorXd(2 * m);
   this->v = VectorXd::Zero(2 * m);
   this->F = VectorXd::Zero(2 * m);
+  this->F_floor = VectorXd::Zero(2 * m);
+  this->F_grav = VectorXd::Zero(2 * m);
 
   this->M = SparseMatrix <double>(2 * m, 2 * m);
   this->M.setIdentity( );
@@ -44,10 +51,121 @@ Sim2D::Sim2D(uint _m, double _meshMass, double _meshSize, bool dSprings) {
   InitPs( ); // init pVec
 } // Sim2D
 
+// inits mesh with given mass and size from image, each non-black pixel is a vertex
+// is [dSprings] is true, then mesh gets diagonal springs
+Sim2D::Sim2D(QImage img, double _meshMass, double _meshSize, bool dSprings) {
+  qDebug( ) << "Start loading mesh from image...";
+  this->m = 0;
+  uint imgW = img.width( ), imgH = img.height( );
+  uint L = max(imgW, imgH);
+  uint vNr;
+  double scale = _meshSize / L;
+
+  // mMap contains indices of vertices for each location
+  vector < vector <int> > mMap(imgW, vector <int> (imgH, -1));
+  QColor col;
+  // determine number of vertices [m]:
+  for (uint x = 1; x < imgW - 1; x++)
+    for (uint y = 1; y < imgH - 1; y++) {
+      col = img.pixel(x, y);
+      if (col.red( ) > 0) { // non-black pixel
+        mMap[x][y] = m;
+        m++;
+      } // if
+    } // for
+
+  this->q = VectorXd(2 * m);
+  this->v = VectorXd::Zero(2 * m);
+  this->F = VectorXd::Zero(2 * m);
+  this->F_floor = VectorXd::Zero(2 * m);
+  this->F_grav = VectorXd::Zero(2 * m);
+
+  // add vertices:
+  for (uint x = 1; x < imgW - 1; x++)
+    for (uint y = 1; y < imgH - 1; y++) {
+      if (mMap[x][y] != -1) {
+        vNr = mMap[x][y];
+        this->q(2 * vNr)     = double(x) * scale;
+        this->q(2 * vNr + 1) = double(y) * scale;
+      } // if
+    } // for
+
+  qDebug( ) << "Added" << m << "vertices";
+
+  // add edges:
+  vector < pair <uint, uint> > eVec;
+  for (uint x = 1; x < imgW - 1; x++) {
+    for (uint y = 1; y < imgH - 1; y++) {
+      if (mMap[x][y] != -1) {
+        vNr = mMap[x][y];
+        if (mMap[x+1][y] != -1) // vertex on right
+          eVec.push_back(make_pair(vNr, mMap[x+1][y]));
+        if (mMap[x][y+1] != -1) // vertex below
+          eVec.push_back(make_pair(vNr, mMap[x][y+1]));
+
+        if (dSprings) { // add diagonal springs
+          if (mMap[x+1][y+1] != -1) // vertex below right
+            eVec.push_back(make_pair(vNr, mMap[x+1][y+1]));
+          if (mMap[x+1][y-1] != -1) // vertex above right
+            eVec.push_back(make_pair(vNr, mMap[x+1][y-1]));
+        } // if
+      } // if
+    } // for
+  } // for
+  this->numEdges = eVec.size( );
+  this->E = MatrixXi(numEdges, 2);
+  for (uint i = 0; i < numEdges; i++) {
+    E(i, 0) = eVec[i].first;
+    E(i, 1) = eVec[i].second;
+  } // for
+  qDebug( ) << "Added" << numEdges << "edges";
+
+  this->h = 0.3;
+  this->simStep = 0;
+  this->iterationsPerStep = 5;
+  this->imgViewSize = 0;
+  this->springForceConstant = 2.5;
+  this->timeInSim = 0;
+  this->gravRefHeight = 0;
+  this->minSpringLen = 1e99;
+  this->meshMass = _meshMass;
+
+  this->M = SparseMatrix <double>(2 * m, 2 * m);
+  this->M.setIdentity( );
+  this->M = this->M * (meshMass / double(m));
+
+  this->Minv = SparseMatrix <double>(2 * m, 2 * m);
+  for (uint i = 0; i < 2 * m; i++)
+    Minv.coeffRef(i, i) = 1.0 / M.coeffRef(i, i);
+
+  InitRestLen( ); // compute rest lengths
+  InitPs( ); // init pVec
+
+  qDebug( ) << "Done loading mesh from image...";
+} // Sim2D
+
 Sim2D::~Sim2D( ) {
 
 } // ~Sim2D
 
+
+// sets value of F_floor
+void Sim2D::ComputeFloorForce( ) {
+  this->F_floor = VectorXd::Zero(2 * m);
+  if (floorEnabled == false) // no floor
+    return;
+
+  double f, y, dy;
+  for (uint i = 0; i < m; i++) {
+    y = q(2 * i + 1);
+    dy = floorHeight - floorDist - y; // positive if above floorDist
+    if (dy >= 0) // vertex too far away
+      continue;
+
+    f = dy * floorC;
+    F_floor(2 * i + 1) += f;
+  } // for
+} // ComputeFloorForce
 
 // returns min x pos in q
 double Sim2D::MinX( ) {
@@ -142,6 +260,34 @@ double Sim2D::MinV( ) {
       ans = GetV(i);
   return ans;
 } // MinV
+
+// returns absolute uitwijking of spring k
+double Sim2D::GetU(int k) {
+  uint v1 = pVec[k].v1;
+  uint v2 = pVec[k].v2;
+  double dx = q(2 * v1) - q(2 * v2);
+  double dy = q(2 * v1 + 1) - q(2 * v2 + 1);
+  double l = sqrt(dx*dx + dy*dy);
+  return fabs(l - pVec[k].r0);
+} // GetU
+
+// returns max uitwijking
+double Sim2D::MaxU( ) {
+  double ans = -1e99;
+  for (uint i = 0; i < m; i++)
+    if (GetU(i) > ans)
+      ans = GetU(i);
+  return ans;
+} // MaxU
+
+// returns min uitwijking
+double Sim2D::MinU( ) {
+  double ans = 1e99;
+  for (uint i = 0; i < m; i++)
+    if (GetU(i) < ans)
+      ans = GetU(i);
+  return ans;
+} // MinU
 
 // returns total kinetic energy of all vertices
 double Sim2D::GetKineticEnergy( ) {
@@ -448,11 +594,11 @@ void Sim2D::SqueezeY(double factor) {
 // sets all y-components of forces in F to m*g
 void Sim2D::SetGravity(double g) {
   this->gravAcc = g;
-  this->F = VectorXd::Zero(2 * m);
+  this->F_grav = VectorXd::Zero(2 * m);
   double mass;
   for (uint i = 0; i < m; i++) {
     mass = this->M.coeff(2 * i, 2 * i);
-    F(2 * i + 1) = mass * g;
+    F_grav(2 * i + 1) = mass * g;
   } // for
   ResetLockedVertices(true);
 } // SetGravity
@@ -550,6 +696,8 @@ void Sim2D::NextStep(bool useLLT, bool doMeasures) {
 
   ResetLockedVertices( ); // to make v and F zero for locked vertices
 
+  ComputeFloorForce( );
+  this->F = F_grav + F_floor;
   VectorXd sn = this->q + (h * this->v) + ((h*h) * (Minv * F)); // estimate of new q
 
   for (uint step = 0; step < numSteps; step++) {
@@ -653,10 +801,10 @@ void Sim2D::InitImgParams( ) {
   double L = max(W, H);
 
   // add border
-  minX -= L / 10;
-  minY -= L / 10;
-  maxX += L / 10;
-  maxY += L / 10;
+  minX -= L / 6;
+  minY -= L / 6;
+  maxX += L / 6;
+  maxY += L / 6;
   W = maxX - minX;
   H = maxY - minY;
   L = max(W, H);
@@ -672,13 +820,11 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
                        bool drawSelectedVertices, bool drawLockedVertices,
                        uint DRAW_MODE) {
 
-  //qDebug( ) << "ToQImage";
-
   QImage img = QImage(SIZE, SIZE, QImage::Format_RGB888);
   QPainter painter(&img);
   QPen pen;
 
-  painter.fillRect(0, 0, SIZE, SIZE, Qt::white);
+  painter.fillRect(0, 0, SIZE, SIZE, QColor(220, 220, 220));
 
   if (useAA)
     painter.setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
@@ -690,20 +836,15 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
   double minY = imgCenterY - 0.5 * imgViewSize;
   double L = imgViewSize;
 
-
   // compute positions in image
   double x, y;
   vector <double> sx, sy;
 
   for (uint i = 0; i < m; i++) {
-    x = this->q(2 * i);
-    y = this->q(2 * i + 1);
-
-    x -= minX;
-    y -= minY;
+    x = this->q(2 * i) - minX;
+    y = this->q(2 * i + 1) - minY;
     x *= SIZE / L; // in [0, SIZE]
     y *= SIZE / L; // in [0, SIZE]
-
     sx.push_back(x);
     sy.push_back(y);
   } // for
@@ -711,24 +852,55 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
   painter.setBrush(QBrush(QColor(80, 200, 50)));
   painter.setPen(Qt::NoPen);
 
+  // draw edges
   if (drawEdges) {
-    // draw edges
-    pen.setColor(Qt::black);
-    painter.setPen(pen);
-
     uint v1, v2; // indices of vertices
-    for (uint e = 0; e < numEdges; e++) {
-      v1 = E(e, 0);
-      v2 = E(e, 1);
-      painter.drawLine(QPointF(sx[v1], sy[v1]), QPointF(sx[v2], sy[v2]));
-    } // for
+    if (DRAW_MODE == 2) { // draw edge stress
+      double cH, cL, cS; // hsl values
+      double valHans; // velocity value in [0 1]
+      double minU = MinU( ) - 1e-6;
+      double maxU = MaxU( ) + 1e-6;
+      double uRange = maxU - minU;
+
+      for (uint e = 0; e < pVec.size( ); e++) {
+        valHans = (GetU(e) - minU) / uRange; // in [0 1]
+
+        if (valHans < 0)
+          valHans = 0;
+        if (valHans > 1)
+          valHans = 1;
+
+        cH = (1.0 - valHans);
+        cS = 1.0;
+        cL = valHans * 0.5;
+
+        QColor col;
+        col.setHslF(cH, cS, cL);
+        pen.setColor(col);
+        painter.setPen(pen);
+        painter.setBrush(QBrush(col));
+        v1 = pVec[e].v1;
+        v2 = pVec[e].v2;
+        painter.drawLine(QPointF(sx[v1], sy[v1]), QPointF(sx[v2], sy[v2]));
+      } // for
+    } // if
+    else {
+      pen.setColor(Qt::black);
+      painter.setPen(pen);
+
+      for (uint e = 0; e < numEdges; e++) {
+        v1 = E(e, 0);
+        v2 = E(e, 1);
+        painter.drawLine(QPointF(sx[v1], sy[v1]), QPointF(sx[v2], sy[v2]));
+      } // for
+    } // else
   } // if
 
   // draw vertices
   painter.setBrush(QBrush(QColor(80, 200, 50)));
   painter.setPen(Qt::NoPen);
 
-  if (DRAW_MODE == 0) { // normal draw mode
+  if (DRAW_MODE == 0 || DRAW_MODE == 2) { // normal draw mode or edge draw mode
     for (uint i = 0; i < m; i++)
       painter.drawEllipse(QPointF(sx[i], sy[i]), 2, 2);
   } // if
@@ -736,39 +908,16 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
   if (DRAW_MODE == 1) { // color vertices by velocity draw mode
     double cH, cL, cS; // hsl values
     double valHans; // velocity value in [0 1]
-
-    double minV = MinV( );
-    double maxV = MaxV( );
+    double minV = MinV( ) - 1e-6;
+    double maxV = MaxV( ) + 1e-6;
     double vRange = maxV - minV;
 
-    if (fabs(vRange) < 1e-9) { // if maxV = minV
-      minV = 0;
-      maxV = 1;
-      vRange = 1;
-    } // if
-
     for (uint i = 0; i < m; i++) {
+      valHans = (GetV(i) - minV) / vRange; // in [0 1]
 
-      if (vRange == 0) {
-        valHans = 0;
-      }
-      else {
-        valHans = (GetV(i) - minV) / vRange; // in [0 1]
-      }
-
-      if (valHans < 0 || valHans > 1)
-        valHans = 0;
-
-      cH = (1.0 - valHans) * 1.0;
+      cH = (1.0 - valHans);
       cS = 1.0;
       cL = valHans * 0.5;
-
-      if (cH < 0 || cH > 1.0)
-        cH = 0.5;
-      if (cS < 0 || cS > 1.0)
-        cS = 0.5;
-      if (cL < 0 || cL > 1.0)
-        cL = 0.5;
 
       QColor col;
       col.setHslF(cH, cS, cL);
@@ -791,8 +940,68 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
       painter.drawEllipse(QPointF(sx[lockedVertices[i]], sy[lockedVertices[i]]), 3, 3);
   } // if
 
+
+  if (floorEnabled) { // draw floor
+    // floor line
+    double fY = floorHeight - minY;
+    fY *= SIZE / L;
+    pen.setColor(Qt::darkGreen);
+    painter.setPen(pen);
+    painter.drawLine(0, fY, SIZE, fY);
+    // floor force line
+    fY = floorHeight - floorDist - minY;
+    fY *= SIZE / L;
+    pen.setColor(Qt::darkYellow);
+    painter.setPen(pen);
+    painter.drawLine(0, fY, SIZE, fY);
+  } // if
+
   return img;
 } // ToQImage
+
+QImage Sim2D::GetlMatrixImage( ) {
+  uint SIZE = 2 * m;
+  QImage img = QImage(SIZE, SIZE, QImage::Format_RGB888);
+  QPainter painter(&img);
+  painter.fillRect(0, 0, SIZE, SIZE, Qt::black);
+
+  if (m == 0)
+    return img;
+
+  double maxVal = -1e99, minVal = 1e99, val;
+  uint nVals = 0;
+
+  for (int k = 0; k < lMatrix.outerSize( ); ++k) {
+    for (SparseMatrix<double>::InnerIterator it(lMatrix, k); it; ++it) {
+      val = it.value( );
+      nVals++;
+      if (val > maxVal)
+        maxVal = val;
+      if (val < minVal)
+        minVal = val;
+    } // for
+  } // for
+
+  double cv;
+  QColor c;
+
+  for (int k = 0; k < lMatrix.outerSize( ); ++k) {
+    for (SparseMatrix<double>::InnerIterator it(lMatrix, k); it; ++it) {
+      val = it.value( );
+      if (val < 0) {
+        cv = 255 * fabs(val) / fabs(minVal);
+        c = QColor(0, 0, cv);
+      } // if
+      else {
+        cv = 255 * fabs(val) / fabs(maxVal);
+        c = QColor(cv, 0, 0);
+      } // if
+
+      img.setPixel(it.col( ), it.row( ), c.toRgb( ).rgb( ));
+    } // for
+  } // for
+  return img;
+} // GetlMatrixImage
 
 
 // puts all vertices in given range in vector [selectedVertices]

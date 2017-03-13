@@ -25,9 +25,7 @@ public:
   uint simStep; // how many steps computed
 
   double meshMass; // total mass of all vertices
-
   double timeInSim; // how many seconds have elapsed
-
   double h; // time step
   double springForceConstant; // [N/m] F_spring = -Cu (C is force constant)
 
@@ -37,10 +35,11 @@ public:
   double rMatrixMakeTime; // [ms] time to construct rMatrix
   double minSpringLen; // [m] smallest length of any spring ever
 
-  // stats for during NextStep
+  // stats for during NextStep:
   vector <double> STEP_disp; // total displacement after each iteration
   vector <double> STEP_totDiffE; // energy loss t.o.v. previous NextStep
 
+  // fundamentals:
   VectorXd q; // position vector in R^2m
   VectorXd v; // velocity vector in R^2m
   VectorXd F; // external forces
@@ -53,6 +52,13 @@ public:
   ConjugateGradient < SparseMatrix < double >, Lower|Upper > cg; // solver for lMatrix
   SimplicialLLT < SparseMatrix < double > > cholenskySolver;
 
+  // floor:
+  bool floorEnabled; // do we have a floor?
+  double floorHeight; // y-pos of floor
+  double floorDist; // within this range force starts acting
+  double floorC; // strength of floor force
+  VectorXd F_floor; // floor force
+  void ComputeFloorForce( );
 
   uint numEdges; // number of edges
   MatrixXi E; // numEdges * 2 matrix containing list of edges
@@ -60,14 +66,14 @@ public:
   vector < SpringPotential2D > pVec; // list of auxiliary variables
   vector < double > restLen; // rest lengths of all springs
 
-  // variables for drawing and manipulating
+  // variables for drawing and manipulating:
   vector < uint > selectedVertices; // list of selected vertices
   vector < uint > lockedVertices; // list of vertices that cannot move
 
   double imgCenterX, imgCenterY; // position of center of QImage
   double imgViewSize; // how large is area inside image
 
-  // position functions
+  // position functions:
   double MinX( );
   double MinY( );
   double MaxX( );
@@ -76,10 +82,15 @@ public:
   double GetCenterOfMassY( ); // returns y-pos of COM
   double GetCenterOfMassX( ); // returns x-pos of COM
 
-  // velocity functions
+  // velocity functions:
   double GetV(int k); // returns velocity of vertex n
   double MaxV( ); // max velocity
   double MinV( ); // min velocity
+
+  // spring length functions:
+  double GetU(int k); // returns uitwijking of spring k
+  double MaxU( ); // max spring uitwijking
+  double MinU( ); // min spring uitwijking
 
   // Energy functions:
   double GetKineticEnergy( ); // returns total kinetic energy of all vertices
@@ -97,6 +108,7 @@ public:
 
   double gravAcc; // gravitational acceleration
   double gravRefHeight; // measure Gravitational energy from this height
+  VectorXd F_grav; // gravitational force
 
   void SetGravity(double g); // sets F with gravity and updates gravAcc
   void SetSpringForceConstant(double C); // updates springForceConstant (also in pVec)
@@ -120,7 +132,10 @@ public:
                   bool drawSelectedVertices = false, bool drawLockedVertices = false,
                   uint DRAW_MODE = 0);
 
+  QImage GetlMatrixImage( ); // converts lMatrix to image
+
   Sim2D(uint _m, double _meshMass = 1, double _meshSize = 1, bool dSprings = true);
+  Sim2D(QImage img, double _meshMass = 1, double _meshSize = 1, bool dSprings = true);
   ~Sim2D( );
 };
 
