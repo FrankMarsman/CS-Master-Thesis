@@ -11,6 +11,7 @@
 #include <QString>
 #include <SparseCholesky>
 #include <omp.h>
+#include <QDebug>
 
 using namespace Eigen;
 using namespace std;
@@ -47,10 +48,11 @@ public:
   SparseMatrix < double > M; // mass matrix of size 2m * 2m
   SparseMatrix < double > Minv; // inverse of mass matrix
   SparseMatrix < double > lMatrix; // constant system matrix
+  SparseMatrix < double > sublMatrix; // original constant system matrix
 
   // solvers:
   ConjugateGradient < SparseMatrix < double >, Lower|Upper > cg; // solver for lMatrix
-  SimplicialLLT < SparseMatrix < double > > cholenskySolver;
+  SimplicialLDLT < SparseMatrix < double >, Lower|Upper > cholenskySolver;
 
   // floor:
   bool floorEnabled; // do we have a floor?
@@ -72,6 +74,11 @@ public:
 
   double imgCenterX, imgCenterY; // position of center of QImage
   double imgViewSize; // how large is area inside image
+
+  // friction
+  bool enableFriction; // if true, friction applies
+  double fricC; // friction constant [kg/m]
+  VectorXd GetFrictionForce( ); // returns friction forces
 
   // position functions:
   double MinX( );
@@ -104,6 +111,7 @@ public:
   void InitRestLen( );
   void InitPs( ); // initializes pVec
   void ComputePs( ); // computes auxilliary variables (updates pVec elements)
+  void ComputePsAndAdd(VectorXd & rv); // computes auxilliary variables and adds to rVec
   void InitLMatrix( );
 
   double gravAcc; // gravitational acceleration
@@ -111,7 +119,7 @@ public:
   VectorXd F_grav; // gravitational force
 
   void SetGravity(double g); // sets F with gravity and updates gravAcc
-  void SetSpringForceConstant(double C); // updates springForceConstant (also in pVec)
+  virtual void SetSpringForceConstant(double C); // updates springForceConstant (also in pVec)
 
   void SetSelectedVertices(double x1, double x2, double y1, double y2);
   void AddLockedVertices( );
@@ -136,7 +144,31 @@ public:
 
   Sim2D(uint _m, double _meshMass = 1, double _meshSize = 1, bool dSprings = true);
   Sim2D(QImage img, double _meshMass = 1, double _meshSize = 1, bool dSprings = true);
+  Sim2D( );
   ~Sim2D( );
 };
+
+
+// Sim2D object containing a spring
+class Sim2D_Spring : public Sim2D {
+public:
+  uint Nw, Nl; // number of nodes in width and length
+
+  virtual void SetSpringForceConstant(double C); // updates springForceConstant (also in pVec)
+
+  Sim2D_Spring(uint _Nw, uint _Nl, double _width, double _len, double _mass);
+  ~Sim2D_Spring( ) {qDebug( ) << "Bye";}
+}; // Sim2D_Spring
+
+
+
+
+
+
+
+
+
+
+
 
 #endif // SIM2D_H

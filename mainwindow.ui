@@ -30,13 +30,13 @@
        <enum>QTabWidget::Rounded</enum>
       </property>
       <property name="currentIndex">
-       <number>4</number>
+       <number>2</number>
       </property>
       <widget class="QWidget" name="SimTab">
        <attribute name="title">
         <string>Sim</string>
        </attribute>
-       <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0,0,0,0,0,0,0,0,0,0">
+       <layout class="QVBoxLayout" name="verticalLayout" stretch="0,0,0,0,0,0,0,0,0,0,0,0,0">
         <property name="sizeConstraint">
          <enum>QLayout::SetMaximumSize</enum>
         </property>
@@ -232,6 +232,36 @@
             </property>
             <property name="value">
              <double>1.000000000000000</double>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="frixLAYOUT">
+          <item>
+           <widget class="QCheckBox" name="frickCheckBox">
+            <property name="text">
+             <string>Enable friction</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QDoubleSpinBox" name="fricSpinBox">
+            <property name="prefix">
+             <string>c = </string>
+            </property>
+            <property name="suffix">
+             <string> kg/m</string>
+            </property>
+            <property name="decimals">
+             <number>4</number>
+            </property>
+            <property name="singleStep">
+             <double>0.001000000000000</double>
+            </property>
+            <property name="value">
+             <double>0.001000000000000</double>
             </property>
            </widget>
           </item>
@@ -494,6 +524,9 @@ hasnds</string>
           </item>
           <item>
            <widget class="QComboBox" name="meshTypeBox">
+            <property name="currentIndex">
+             <number>0</number>
+            </property>
             <item>
              <property name="text">
               <string>Square mesh</string>
@@ -502,6 +535,11 @@ hasnds</string>
             <item>
              <property name="text">
               <string>Mesh from image</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Spring</string>
              </property>
             </item>
            </widget>
@@ -653,10 +691,10 @@ hasnds</string>
         <item>
          <widget class="QComboBox" name="initActionBox">
           <property name="currentText">
-           <string>Add twist velocity X,Y</string>
+           <string>Lock bottom vertices</string>
           </property>
           <property name="currentIndex">
-           <number>3</number>
+           <number>1</number>
           </property>
           <item>
            <property name="text">
@@ -681,6 +719,11 @@ hasnds</string>
           <item>
            <property name="text">
             <string>Add twist velocity X,Y and squeeze</string>
+           </property>
+          </item>
+          <item>
+           <property name="text">
+            <string>Lock top/bottom and stretch</string>
            </property>
           </item>
          </widget>
@@ -932,7 +975,7 @@ hasnds</string>
              <string>Use floor</string>
             </property>
             <property name="checked">
-             <bool>true</bool>
+             <bool>false</bool>
             </property>
            </widget>
           </item>
@@ -1070,6 +1113,13 @@ hasnds</string>
         <string>Plots</string>
        </attribute>
        <layout class="QVBoxLayout" name="verticalLayout_7">
+        <item>
+         <widget class="QCheckBox" name="plotCheckBox">
+          <property name="text">
+           <string>Plot things</string>
+          </property>
+         </widget>
+        </item>
         <item>
          <layout class="QHBoxLayout" name="horizontalLayout_4">
           <item>

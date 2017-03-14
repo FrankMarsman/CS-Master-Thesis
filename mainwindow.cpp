@@ -32,7 +32,7 @@ MainWindow::MainWindow(QWidget *parent) :
   ui(new Ui::MainWindow) {
   ui->setupUi(this);
 
-  uint N = 8;
+  uint N = 30;
   double l = ui->meshSizeBox->value( );
   double mass = ui->meshMassBox->value( );
   this->sim = new Sim2D(N * N, mass, l);
@@ -137,6 +137,8 @@ void MainWindow::Run( ) {
   } // if
 
   this->sim->iterationsPerStep = ui->nStepsSpinBox->value( );
+  this->sim->enableFriction = ui->frickCheckBox->isChecked( );
+  this->sim->fricC = ui->fricSpinBox->value( );
 
   bool useLLT = ui->lltBox->isChecked( );
 
@@ -356,61 +358,58 @@ void MainWindow::UpdateInfoText( ) {
   ui->netFpsLabel->setText(QString::number(netFPS, 'f', 0));
   ui->simInfoLabel->setText(sim->GetInfoString( ));
 
+  bool plotThings = ui->plotCheckBox->isChecked( );
+
+  if (plotThings) {
   this->UpdateStepPlot( );
+    QCustomPlot * customPlot = ui->ePlot;
 
-  // TEMP!
-  QCustomPlot * customPlot = ui->ePlot;
+    this->tVec.push_back(sim->timeInSim);
+    this->E_grav.push_back(sim->GetGravPotEnergy( ));
+    this->E_pot.push_back(sim->GetSpringPotentialEnergy( ));
+    this->E_kin.push_back(sim->GetKineticEnergy( ));
+    this->E_tot.push_back(E_grav.back( ) + E_kin.back( ) + E_pot.back( ));
 
-  this->tVec.push_back(sim->timeInSim);
-  this->E_grav.push_back(sim->GetGravPotEnergy( ));
-  this->E_pot.push_back(sim->GetSpringPotentialEnergy( ));
-  this->E_kin.push_back(sim->GetKineticEnergy( ));
-  this->E_tot.push_back(E_grav.back( ) + E_kin.back( ) + E_pot.back( ));
+    // create graph and assign data to it:
+    customPlot->clearGraphs( );
+    customPlot->legend->setVisible(true);
+    customPlot->axisRect()->insetLayout()->setInsetAlignment(0, Qt::AlignLeft|Qt::AlignTop);
+    customPlot->setAntialiasedElements(QCP::aePlottables);
 
-  // create graph and assign data to it:
-  customPlot->clearGraphs( );
+    customPlot->addGraph( );
+    customPlot->addGraph( );
+    customPlot->addGraph( );
+    customPlot->addGraph( );
 
-  customPlot->legend->setVisible(true);
-  customPlot->axisRect()->insetLayout()->setInsetAlignment(0, Qt::AlignLeft|Qt::AlignTop);
+    customPlot->graph(0)->setData(tVec, E_tot);
+    customPlot->graph(1)->setData(tVec, E_pot);
+    customPlot->graph(2)->setData(tVec, E_kin);
+    customPlot->graph(3)->setData(tVec, E_grav);
 
-  customPlot->setAntialiasedElements(QCP::aePlottables);
+    customPlot->graph(0)->setPen(QPen(Qt::blue));
+    customPlot->graph(1)->setPen(QPen(Qt::red));
+    customPlot->graph(2)->setPen(QPen(Qt::green));
+    customPlot->graph(3)->setPen(QPen(Qt::black));
 
-  customPlot->addGraph( );
-  customPlot->addGraph( );
-  customPlot->addGraph( );
-  customPlot->addGraph( );
+    customPlot->graph(0)->setName("Tot E");
+    customPlot->graph(1)->setName("E_spring");
+    customPlot->graph(2)->setName("E_kin");
+    customPlot->graph(3)->setName("E_grav");
 
-  //qDebug( ) << "number of grapgs:" << customPlot->graphCount( );
+    // give the axes some labels:
+    customPlot->xAxis->setLabel("Time [s]");
+    customPlot->yAxis->setLabel("Energy [J]");
 
-  customPlot->graph(0)->setData(tVec, E_tot);
-  customPlot->graph(1)->setData(tVec, E_pot);
-  customPlot->graph(2)->setData(tVec, E_kin);
-  customPlot->graph(3)->setData(tVec, E_grav);
+    // set axes ranges, so we see all data:
+    customPlot->xAxis->setRange(0, tVec.back( ));
 
-  customPlot->graph(0)->setPen(QPen(Qt::blue));
-  customPlot->graph(1)->setPen(QPen(Qt::red));
-  customPlot->graph(2)->setPen(QPen(Qt::green));
-  customPlot->graph(3)->setPen(QPen(Qt::black));
+    customPlot->graph(0)->rescaleAxes( );
+    customPlot->graph(1)->rescaleAxes(true);
+    customPlot->graph(2)->rescaleAxes(true);
+    customPlot->graph(3)->rescaleAxes(true);
 
-  customPlot->graph(0)->setName("Tot E");
-  customPlot->graph(1)->setName("E_spring");
-  customPlot->graph(2)->setName("E_kin");
-  customPlot->graph(3)->setName("E_grav");
-
-  // give the axes some labels:
-  customPlot->xAxis->setLabel("Time [s]");
-  customPlot->yAxis->setLabel("Energy [J]");
-
-  // set axes ranges, so we see all data:
-  customPlot->xAxis->setRange(0, tVec.back( ));
-  //customPlot->yAxis->setRange(-fabs(E_tot.back( ) * 1.5), fabs(E_tot.back( ) * 1.5));
-
-  customPlot->graph(0)->rescaleAxes( );
-  customPlot->graph(1)->rescaleAxes(true);
-  customPlot->graph(2)->rescaleAxes(true);
-  customPlot->graph(3)->rescaleAxes(true);
-
-  customPlot->replot( );
+    customPlot->replot( );
+  } // if
 } // UpdateInfoText
 
 void MainWindow::UpdateMeshImage( ) {
@@ -621,6 +620,10 @@ void MainWindow::on_initButton_clicked( ) {
     ui->statusBar->showMessage("Mesh from image, m = " + QString::number(sim->m));
   } // if
 
+  if (mType == 2) { // spring
+    this->sim = new Sim2D_Spring(10, 50, 0.1, 1, mass);
+  } // if
+
   PerformInitDeform( );
 
   // gravity:
@@ -709,6 +712,15 @@ void MainWindow::PerformInitDeform( ) {
     sim->AddVelocity(0, -speed);
     sim->SqueezeX(0.9);
     sim->SqueezeY(0.9);
+  } // if
+
+  if (actionIndex == 5) { // lock bottom and top vertices and strech out
+    sim->lockedVertices.clear( );
+    for (uint i = 0; i < N; i++) { // lock first and last N vertices
+      sim->lockedVertices.push_back(i);
+      sim->lockedVertices.push_back(m - i - 1);
+    } // for
+    sim->SqueezeY(1.5);
   } // if
 } // PerformInitDeform
 

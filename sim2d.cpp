@@ -17,9 +17,19 @@
 #include <vector>
 #include <utility>
 
+Sim2D::Sim2D( ) {
+  this->simStep = 0;
+  this->imgViewSize = 0;
+  this->timeInSim = 0;
+  this->gravRefHeight = 0;
+  this->minSpringLen = 1e99;
+} // Sim2D
+
+
 // inits mesh with given mass and size,
 // is [dSprings] is true, then mesh gets diagonal springs
 Sim2D::Sim2D(uint _m, double _meshMass, double _meshSize, bool dSprings) {
+  qDebug( ) << "Sim2D constructor";
   this->h = 0.3;
   this->m = _m;
   this->simStep = 0;
@@ -37,18 +47,28 @@ Sim2D::Sim2D(uint _m, double _meshMass, double _meshSize, bool dSprings) {
   this->F_floor = VectorXd::Zero(2 * m);
   this->F_grav = VectorXd::Zero(2 * m);
 
+  qDebug( ) << "Sim2D constructor - init M matrices";
   this->M = SparseMatrix <double>(2 * m, 2 * m);
   this->M.setIdentity( );
   this->M = this->M * (meshMass / double(m));
   this->Minv = SparseMatrix <double>(2 * m, 2 * m);
 
+  qDebug( ) << "Sim2D constructor - compute Minv";
   for (uint i = 0; i < 2 * m; i++) {
+    // TEMP!
+    //uint N = sqrt(m);
+    //if (i >= m - 2 * N)
+    //  M.coeffRef(i, i) = M.coeffRef(i, i) * 50;
     Minv.coeffRef(i, i) = 1.0 / M.coeffRef(i, i);
   } // for
 
+  qDebug( ) << "Sim2D constructor - Init mesh";
   InitMesh_Square(_meshSize, dSprings); // init edges and stuff
+  qDebug( ) << "Sim2D constructor - Init rest len";
   InitRestLen( ); // compute rest lengths
+  qDebug( ) << "Sim2D constructor - Init Ps";
   InitPs( ); // init pVec
+  qDebug( ) << "Sim2D constructor DONE";
 } // Sim2D
 
 // inits mesh with given mass and size from image, each non-black pixel is a vertex
@@ -167,6 +187,23 @@ void Sim2D::ComputeFloorForce( ) {
   } // for
 } // ComputeFloorForce
 
+VectorXd Sim2D::GetFrictionForce( ) {
+  VectorXd Fwr = VectorXd::Zero(2 * m);
+  if (!enableFriction)
+    return Fwr;
+
+  double vel, f;
+  for (uint i = 0; i < m; i++) {
+    vel = GetV(i);
+    if (vel < 1e-9)
+      continue;
+    f = -fricC * vel * vel;
+    Fwr(2 * i) = f * v(2 * i) / vel;
+    Fwr(2 * i + 1) = f * v(2 * i + 1) / vel;
+  } // for
+  return Fwr;
+} // GetFrictionForce
+
 // returns min x pos in q
 double Sim2D::MinX( ) {
   double ans = 1e99;
@@ -268,6 +305,7 @@ double Sim2D::GetU(int k) {
   double dx = q(2 * v1) - q(2 * v2);
   double dy = q(2 * v1 + 1) - q(2 * v2 + 1);
   double l = sqrt(dx*dx + dy*dy);
+  return fabs(pVec[k].GetPotE(q(2 * v1), q(2 * v1 + 1), q(2 * v2), q(2 * v2 + 1)));
   return fabs(l - pVec[k].r0);
 } // GetU
 
@@ -488,7 +526,7 @@ void Sim2D::ComputePs( ) {
       pot.dy = fac * dy;
     } // if
     else {
-      qDebug( ) << "l = 0 in ComputePs!";
+      //qDebug( ) << "l = 0 in ComputePs!";
       pot.dx = pot.r0 / sqrt(2);
       pot.dy = pot.r0 / sqrt(2);
     } // else
@@ -503,6 +541,52 @@ void Sim2D::ComputePs( ) {
   else
     this->pSolveTime = double(microseconds) / 1000;
 } // ComputePs
+
+// compute auxilliary variables and adds to rv
+void Sim2D::ComputePsAndAdd(VectorXd &rv) {
+  auto start = std::chrono::high_resolution_clock::now( );
+  auto elapsed = std::chrono::high_resolution_clock::now( ) - start;
+  long long microseconds;
+
+  for (auto & pot : pVec) {
+    uint ix1 = pot.v1 * 2;
+    uint ix2 = pot.v2 * 2;
+    double dx = q(ix2) - q(ix1);
+    double dy = q(ix2 + 1) - q(ix1 + 1);
+    double l = sqrt(dx*dx + dy*dy);
+
+    if (l < minSpringLen)
+      minSpringLen = l;
+
+    double fac;
+    if (l > 0) {
+      fac = pot.r0 / l;
+      pot.dx = fac * dx;
+      pot.dy = fac * dy;
+    } // if
+    else {
+      //qDebug( ) << "l = 0 in ComputePs!";
+      pot.dx = pot.r0 / sqrt(2);
+      pot.dy = pot.r0 / sqrt(2);
+    } // else
+
+    double wdx = pot.w * pot.dx;
+    double wdy = pot.w * pot.dy;
+    rv(ix1) -= wdx;
+    rv(ix1 + 1) -= wdy;
+    rv(ix2) += wdx;
+    rv(ix2 + 1) += wdy;
+  } // for
+
+
+  elapsed = std::chrono::high_resolution_clock::now( ) - start;
+  microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count( );
+
+  if (simStep > 0)
+    this->pSolveTime = 0.999 * this->pSolveTime + 0.001 * (double(microseconds) / 1000);
+  else
+    this->pSolveTime = double(microseconds) / 1000;
+} // ComputePsAndAdd
 
 
 // displaces selected vertices randomly
@@ -616,48 +700,95 @@ void Sim2D::SetSpringForceConstant(double C) {
 
 // computes lMatrix and initializes solver
 void Sim2D::InitLMatrix( ) {
-  //qDebug( ) << "Init lMatrix! h =" << h;
+  qDebug( ) << "Init lMatrix! h =" << h
+            << "m =" << m
+            << "#locked =" << lockedVertices.size( );
+
+  time_t t = clock( );
 
   // compute (constant) lMatrix
-  lMatrix = SparseMatrix<double> (2 * m, 2 * m); // left side
+  uint numConstraints = lockedVertices.size( );
+  uint index;
+  lMatrix = SparseMatrix<double> (2 * m + 2 * numConstraints, 2 * m + 2 * numConstraints); // left side
+  sublMatrix = SparseMatrix<double> (2 * m , 2 * m); // left side
   uint v1, v2; // indices of vertices
-  //qDebug( ) << "lMatrix initialized, now adding S S^T";
+
+  uint sizeEst = pVec.size( ) * 8; // estimate of nr of nonzero elements in lMatrix
+  std::vector< Eigen::Triplet<double> > tripletList;
+  tripletList.reserve(sizeEst);
+
+
+  qDebug( ) << "lMatrix initialized, now adding S S^T";
   for (uint e = 0; e < pVec.size( ); e++) {
     v1 = pVec[e].v1;
     v2 = pVec[e].v2;
 
     // add w_i on diagonal, pos v1 and v2:
-    lMatrix.coeffRef(2 * v1, 2 * v1) += 1 * pVec[e].w;
-    lMatrix.coeffRef(2 * v1 + 1, 2 * v1 + 1) += 1 * pVec[e].w;
-    lMatrix.coeffRef(2 * v2, 2 * v2) += 1 * pVec[e].w;
-    lMatrix.coeffRef(2 * v2 + 1, 2 * v2 + 1) += 1 * pVec[e].w;
-
+    tripletList.push_back(Eigen::Triplet<double>(2 * v1, 2 * v1, 1 * pVec[e].w));
+    tripletList.push_back(Eigen::Triplet<double>(2 * v1 + 1, 2 * v1 + 1, 1 * pVec[e].w));
+    tripletList.push_back(Eigen::Triplet<double>(2 * v2, 2 * v2, 1 * pVec[e].w));
+    tripletList.push_back(Eigen::Triplet<double>(2 * v2 + 1, 2 * v2 + 1, 1 * pVec[e].w));
     // add -w_i on non-diagonal
-    lMatrix.coeffRef(2 * v1, 2 * v2) -= 1 * pVec[e].w;
-    lMatrix.coeffRef(2 * v1 + 1, 2 * v2 + 1) -= 1 * pVec[e].w;
-    lMatrix.coeffRef(2 * v2, 2 * v1) -= 1 * pVec[e].w;
-    lMatrix.coeffRef(2 * v2 + 1, 2 * v1 + 1) -= 1 * pVec[e].w;
+    tripletList.push_back(Eigen::Triplet<double>(2 * v1, 2 * v2, -1 * pVec[e].w));
+    tripletList.push_back(Eigen::Triplet<double>(2 * v1 + 1, 2 * v2 + 1, -1 * pVec[e].w));
+    tripletList.push_back(Eigen::Triplet<double>(2 * v2, 2 * v1, -1 * pVec[e].w));
+    tripletList.push_back(Eigen::Triplet<double>(2 * v2 + 1, 2 * v1 + 1, -1 * pVec[e].w));
+  } // for
+  lMatrix.setFromTriplets(tripletList.begin( ), tripletList.end( ));
+  sublMatrix.setFromTriplets(tripletList.begin( ), tripletList.end( ));
+
+  qDebug( ) << "adding S S^T don after "
+            << 1000 * double(clock()-t)/CLOCKS_PER_SEC
+            << "ms, now adding A blocks";
+  t = clock( );
+
+  // add A and A^T
+  for (uint i = 0; i < lockedVertices.size( ); i++) {
+    index = lockedVertices[i];
+    // add A (below G)
+    lMatrix.insert(2 * m + 2 * i    , 2 * index    ) = 1;
+    lMatrix.insert(2 * m + 2 * i + 1, 2 * index + 1) = 1;
+    // -add A^T (right of G)
+    lMatrix.insert(2 * index    , 2 * m + 2 * i    ) = 1;
+    lMatrix.insert(2 * index + 1, 2 * m + 2 * i + 1) = 1;
   } // for
 
-  //qDebug( ) << "adding S S^T done, adding M/h^2";
+
+  qDebug( ) << "adding A blocks done after "
+            << 1000 * double(clock()-t)/CLOCKS_PER_SEC
+            << "ms, adding M/h^2";
+  t = clock( );
 
   if (h == 0)
     qDebug( ) << "Error in InitLMatrix, h = 0!";
 
 
-  lMatrix += (1.0 / (h*h)) * this->M;
+  sublMatrix += (1.0 / (h*h)) * this->M;
 
-  time_t t = clock( );
+  for (uint i = 0; i < 2 * m; i++) {
+    lMatrix.coeffRef(i, i) += (1.0 / (h*h)) * M.coeffRef(i, i);
+  } // for
+
+
   // init cholenskysolver:
-  //qDebug( ) << "Done. now cholenskySolver.analyzePattern(lMatrix):";
+  qDebug( ) << "Done. now cholenskySolver.analyzePattern(lMatrix):";
   this->cholenskySolver.analyzePattern(lMatrix);
-  //qDebug( ) << "cholenskySolver.factorize(lMatrix):";
-  this->cholenskySolver.factorize(lMatrix); // now solver is ready to solve [lMatrix * x = b]
-  double elapsed = double(clock( ) - t) / CLOCKS_PER_SEC;
-  //qDebug( ) << "Done with Cholensky decomp, comp time =" << 1000 * elapsed << "ms";
 
+  qDebug( ) << "Done after "
+            << 1000 * double(clock()-t)/CLOCKS_PER_SEC
+            << "ms, cholenskySolver.factorize(lMatrix):";
+  t = clock( );
+
+  this->cholenskySolver.factorize(lMatrix); // now solver is ready to solve [lMatrix * x = b]
+  qDebug( ) << "Done with Cholensky decomp, comp time ="
+            << 1000 * double(clock()-t)/CLOCKS_PER_SEC
+            << "ms, now cg.compute:";
+  t = clock( );
   // init other solver
   this->cg.compute(lMatrix); // now solver is ready to solve [lMatrix * x = b]
+  qDebug( ) << "Done . comp time ="
+            << 1000 * double(clock()-t)/CLOCKS_PER_SEC
+            << "ms";
 } // InitLMatrix
 
 
@@ -674,7 +805,6 @@ void Sim2D::NextStep(bool useLLT, bool doMeasures) {
     InitLMatrix( );
 
   uint numSteps = iterationsPerStep;
-  uint index;
 
   oldQ = this->q;
   prevQ = this->q;
@@ -694,47 +824,79 @@ void Sim2D::NextStep(bool useLLT, bool doMeasures) {
   auto elapsed = std::chrono::high_resolution_clock::now( ) - start;
   long long microseconds;
 
-  ResetLockedVertices( ); // to make v and F zero for locked vertices
-
+  //ResetLockedVertices( ); // to make v and F zero for locked vertices
   ComputeFloorForce( );
-  this->F = F_grav + F_floor;
+
+  uint numConstraints = lockedVertices.size( );
+
+  VectorXd leftVec = VectorXd::Zero(2 * m + 2 * numConstraints); // vector to solve
+  VectorXd rightVec = VectorXd::Zero(2 * m + 2 * numConstraints); // right vector
+  VectorXd tempAdd = VectorXd::Zero(2 * m); // (1.0 / (h*h)) * (this->M * sn)
+  VectorXd rightAdd = VectorXd::Zero(2 * m + 2 * numConstraints); // longer version of tempAdd
+
+  if (enableFriction)
+    this->F = F_grav + F_floor + GetFrictionForce( );
+  else
+    this->F = F_grav + F_floor;
+
   VectorXd sn = this->q + (h * this->v) + ((h*h) * (Minv * F)); // estimate of new q
+
+  tempAdd = (1.0 / (h*h)) * (this->M * sn);
+  rightAdd.head(2 * m) = tempAdd;
 
   for (uint step = 0; step < numSteps; step++) {
     // LOCAL: FIND pi's
-    ComputePs( );
+    //ComputePs( );
 
     // compute right:
     start = std::chrono::high_resolution_clock::now( );
-    VectorXd rMatrix = VectorXd::Zero(2 * m); // right side
+    //VectorXd rVector = VectorXd::Zero(2 * m); // right side
 
+    rightVec = VectorXd::Zero(2 * m + 2 * numConstraints); // vector to solve
+    ComputePsAndAdd(rightVec);
+//    for (uint i = 0; i < pVec.size( ); i++) {
+//      //pVec[i].AddToPosVec(rVector);
+//      pVec[i].AddToPosVec(rightVec);
+//    } // for
 
-    for (uint i = 0; i < pVec.size( ); i++) {
-      pVec[i].AddToPosVec(rMatrix);
-    } // for
+    rightVec += rightAdd;
+    rightVec *= -1;
 
-    rMatrix += (1.0 / (h*h)) * (this->M * sn);
+    //tempAdd = sublMatrix * q;
+    rightVec.head(2 * m) += sublMatrix * q;
+    //for (uint i = 0; i < 2 * m; i++)
+    //  rightVec(i) += tempAdd(i);
+
 
     elapsed = std::chrono::high_resolution_clock::now( ) - start;
     microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count( );
     cur_rMatrixMakeTime += double(microseconds) / 1000;
 
     start = std::chrono::high_resolution_clock::now( );
+//    if (useLLT)
+//      q = this->cholenskySolver.solve(rVector);
+//    else
+//      q = this->cg.solve(rVector);
     if (useLLT)
-      q = this->cholenskySolver.solve(rMatrix);
+      leftVec = this->cholenskySolver.solve(rightVec);
     else
-      q = this->cg.solve(rMatrix);
+      leftVec = this->cg.solve(rightVec);
+
+    q -= leftVec.head(2 * m);
+//    for (uint i = 0; i < 2 * m; i++)
+//      q(i) -= leftVec(i);
+    //q = leftVec.head(2 * m);
 
     elapsed = std::chrono::high_resolution_clock::now( ) - start;
     microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count( );
     cur_qSolveTime += double(microseconds) / 1000;
 
-    // reset locked vertices positions
-    for (uint i = 0; i < lockedVertices.size( ); i++) {
-      index = lockedVertices[i];
-      q(2 * index) = oldQ(2 * index);
-      q(2 * index + 1) = oldQ(2 * index + 1);
-    } // for
+//    // reset locked vertices positions
+//    for (uint i = 0; i < lockedVertices.size( ); i++) {
+//      index = lockedVertices[i];
+//      q(2 * index) = oldQ(2 * index);
+//      q(2 * index + 1) = oldQ(2 * index + 1);
+//    } // for
 
     if (doMeasures) {
       VectorXd qDiff = q - prevQ;
@@ -751,7 +913,7 @@ void Sim2D::NextStep(bool useLLT, bool doMeasures) {
 
   this->v = (1.0 / h) * (q - oldQ);
 
-  ResetLockedVertices(false);
+  //ResetLockedVertices(false);
 
   cur_qSolveTime /= numSteps;
   cur_rMatrixMakeTime /= numSteps;
@@ -793,8 +955,8 @@ void Sim2D::InitImgParams( ) {
   double maxX = MaxX( );
   double maxY = MaxY( );
 
-//  qDebug( ) << "ImgParams, min/maxX =" << minX << maxX
-//            << "min/maxY =" << minY << maxY;
+  qDebug( ) << "ImgParams, min/maxX =" << minX << maxX
+            << "min/maxY =" << minY << maxY;
 
   double W = maxX - minX;
   double H = maxY - minY;
@@ -858,8 +1020,8 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
     if (DRAW_MODE == 2) { // draw edge stress
       double cH, cL, cS; // hsl values
       double valHans; // velocity value in [0 1]
-      double minU = MinU( ) - 1e-6;
-      double maxU = MaxU( ) + 1e-6;
+      double minU = MinU( ) - 1e-9;
+      double maxU = MaxU( ) + 1e-9;
       double uRange = maxU - minU;
 
       for (uint e = 0; e < pVec.size( ); e++) {
@@ -960,7 +1122,7 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
 } // ToQImage
 
 QImage Sim2D::GetlMatrixImage( ) {
-  uint SIZE = 2 * m;
+  uint SIZE = max(lMatrix.rows( ), lMatrix.cols( ));
   QImage img = QImage(SIZE, SIZE, QImage::Format_RGB888);
   QPainter painter(&img);
   painter.fillRect(0, 0, SIZE, SIZE, Qt::black);
@@ -970,10 +1132,12 @@ QImage Sim2D::GetlMatrixImage( ) {
 
   double maxVal = -1e99, minVal = 1e99, val;
   uint nVals = 0;
+  double absSum = 0; // sum of elements
 
   for (int k = 0; k < lMatrix.outerSize( ); ++k) {
     for (SparseMatrix<double>::InnerIterator it(lMatrix, k); it; ++it) {
       val = it.value( );
+      absSum += fabs(val);
       nVals++;
       if (val > maxVal)
         maxVal = val;
@@ -985,15 +1149,20 @@ QImage Sim2D::GetlMatrixImage( ) {
   double cv;
   QColor c;
 
+  qDebug( ) << "GetlMatrix image, absSum =" << absSum
+            << "min/max val:" << minVal << maxVal;
+
   for (int k = 0; k < lMatrix.outerSize( ); ++k) {
     for (SparseMatrix<double>::InnerIterator it(lMatrix, k); it; ++it) {
       val = it.value( );
       if (val < 0) {
         cv = 255 * fabs(val) / fabs(minVal);
+        cv = 255;
         c = QColor(0, 0, cv);
       } // if
       else {
         cv = 255 * fabs(val) / fabs(maxVal);
+        cv = 255;
         c = QColor(cv, 0, 0);
       } // if
 
@@ -1038,6 +1207,136 @@ void Sim2D::AddLockedVertices( ) {
   for (uint i = 0; i < selectedVertices.size( ); i++)
     lockedVertices.push_back(selectedVertices[i]);
 } // AddLockedVertices
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Sim2D_Spring::Sim2D_Spring(uint _Nw, uint _Nl, double _width, double _len, double _mass) : Sim2D( ){
+  qDebug( ) << "Sim2D_Spring constructor";
+  this->h = 0.3;
+  this->m = _Nw * _Nl;
+  this->Nw = _Nw;
+  this->Nl = _Nl;
+
+  this->simStep = 0;
+  this->imgViewSize = 0;
+  this->timeInSim = 0;
+  this->gravRefHeight = 0;
+  this->minSpringLen = 1e99;
+
+  this->iterationsPerStep = 5;
+  this->springForceConstant = 2.5;
+  this->minSpringLen = 1e99;
+  this->meshMass = _mass;
+
+  this->q = VectorXd(2 * m);
+  this->v = VectorXd::Zero(2 * m);
+  this->F = VectorXd::Zero(2 * m);
+  this->F_floor = VectorXd::Zero(2 * m);
+  this->F_grav = VectorXd::Zero(2 * m);
+
+  qDebug( ) << "Sim2D_Spring constructor - init M matrices";
+  this->M = SparseMatrix <double>(2 * m, 2 * m);
+  this->Minv = SparseMatrix <double>(2 * m, 2 * m);
+
+  qDebug( ) << "Sim2D_Spring constructor - compute Minv";
+  for (uint i = 0; i < 2 * m; i++) {
+    if (i < Nw * 2) // bottom row, heavy nodes
+      M.coeffRef(i, i) = _mass / Nw;
+    else
+      M.coeffRef(i, i) = 1e-1 * _mass / m;
+    Minv.coeffRef(i, i) = 1.0 / M.coeffRef(i, i);
+  } // for
+
+  // lock top row
+  for (uint i = 0; i < Nw; i++)
+    this->lockedVertices.push_back(m - i - 1);
+
+
+  // init mesh:
+  qDebug( ) << "Sim2D_Spring constructor - init mesh";
+  double x, y;
+  uint index;
+  for (uint j = 0; j < Nl; j++) {
+    for (uint i = 0; i < Nw; i++) {
+      index = j * Nw + i;
+      if (index >= m)
+        qDebug( ) << "Error, index too large!";
+      x = _width * (double(i) / double(Nw-1)) - 0.5 * _width;
+      y = _len * (double(j) / double(Nl-1)) - 0.5 * _len;
+
+      this->q(2 * index)     = x;
+      this->q(2 * index + 1) = -y;
+    } // for
+  } // for
+
+  // now init edges
+  uint nE = Nl * (Nw - 1) + Nw * (Nl - 1); // number of edges
+
+  qDebug( ) << "Sim2D_Spring constructor - Init mesh, nE =" << nE;
+
+  this->E = MatrixXi(nE, 2);
+  this->numEdges = 0;
+
+  for (uint i = 0; i < m; i++) {
+    if ((i + 1) % Nw != 0) { // connect to vertex on right
+      E(numEdges, 0) = i;
+      E(numEdges, 1) = i + 1;
+      numEdges++;
+    } // if
+    if (i + Nw < m) { // connect to vertex below
+      E(numEdges, 0) = i;
+      E(numEdges, 1) = i + Nw;
+      numEdges++;
+    } // if
+  } // for
+
+  if (numEdges != nE) { // m not a square
+    qDebug( ) << "Error in InitMesh! numEdges =" << numEdges << "!=" << nE;
+    return;
+  } // if
+
+  double yCOM = this->GetCenterOfMassY( );
+  this->gravRefHeight = yCOM;
+
+  qDebug( ) << "Sim2D constructor - Init rest len";
+  InitRestLen( ); // compute rest lengths
+  qDebug( ) << "Sim2D constructor - Init Ps";
+  InitPs( ); // init pVec
+  qDebug( ) << "Sim2D constructor DONE";
+} // Sim2D_Spring
+
+
+// sets sprinForceConstant to C and also changes this
+// in pVec for all SpringPotentials by changing their weights
+void Sim2D_Spring::SetSpringForceConstant(double C) {
+  this->springForceConstant = C;
+  for (uint i = 0; i < pVec.size( ); i++) {
+    if (pVec[i].r0 < 0.0001)
+      qDebug( ) << "Smth wrong, r0 =" << pVec[i].r0;
+    pVec[i].w = C * 1.0 / pVec[i].r0;
+  } // for
+  // system matrix has changed, so recompute lMatrix:
+  InitLMatrix( );
+} // SetSpringForceConstant
+
+
+
+
 
 
 
