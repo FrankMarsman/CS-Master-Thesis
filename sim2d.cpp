@@ -47,13 +47,13 @@ Sim2D::Sim2D(uint _m, double _meshMass, double _meshSize, bool dSprings) {
   this->F_floor = VectorXd::Zero(2 * m);
   this->F_grav = VectorXd::Zero(2 * m);
 
-  qDebug( ) << "Sim2D constructor - init M matrices";
+  //qDebug( ) << "Sim2D constructor - init M matrices";
   this->M = SparseMatrix <double>(2 * m, 2 * m);
   this->M.setIdentity( );
   this->M = this->M * (meshMass / double(m));
   this->Minv = SparseMatrix <double>(2 * m, 2 * m);
 
-  qDebug( ) << "Sim2D constructor - compute Minv";
+  //qDebug( ) << "Sim2D constructor - compute Minv";
   for (uint i = 0; i < 2 * m; i++) {
     // TEMP!
     //uint N = sqrt(m);
@@ -62,11 +62,11 @@ Sim2D::Sim2D(uint _m, double _meshMass, double _meshSize, bool dSprings) {
     Minv.coeffRef(i, i) = 1.0 / M.coeffRef(i, i);
   } // for
 
-  qDebug( ) << "Sim2D constructor - Init mesh";
+  //qDebug( ) << "Sim2D constructor - Init mesh";
   InitMesh_Square(_meshSize, dSprings); // init edges and stuff
-  qDebug( ) << "Sim2D constructor - Init rest len";
+  //qDebug( ) << "Sim2D constructor - Init rest len";
   InitRestLen( ); // compute rest lengths
-  qDebug( ) << "Sim2D constructor - Init Ps";
+  //qDebug( ) << "Sim2D constructor - Init Ps";
   InitPs( ); // init pVec
   qDebug( ) << "Sim2D constructor DONE";
 } // Sim2D
@@ -168,6 +168,102 @@ Sim2D::~Sim2D( ) {
 
 } // ~Sim2D
 
+// get list of g-vals from index, every value is added twice
+vector < double > Sim2D::GetGList(uint index) {
+  vector < double > ans(2 * m, 0);
+  if (index >= reductionVertices.size( )) {
+    qDebug( ) << "Can't get G list, index > size";
+    return ans;
+  } // if
+
+  for (uint i = 0; i < m; i++) {
+    double d = Dist(reductionVertices[index], i);
+    d *= d;
+    d /= reductSigma;
+    if (exp(-d) >= reductMinG) {
+      ans[2 * i] = exp(-d);
+      ans[2 * i + 1] = exp(-d);
+    } // if
+    else {
+      ans[2 * i] = 0;
+      ans[2 * i + 1] = 0;
+    } // else
+  } // for
+  return ans;
+} // GetGList
+
+// computes U
+void Sim2D::ComputeReductionMatrix( ) {
+  uint D = this->reductionVertices.size( );
+  if (D == 0) {
+    qDebug( ) << "Can't make U, no vertices!";
+    return;
+  } // if
+
+  this->U = SparseMatrix < double > (2 * m, 2 * D);
+
+  std::vector < Eigen::Triplet < double > > tripletList;
+  vector < double > gList; // stores column values
+  vector < double > rowSum(2 * m, 0); // sum of entries in each row
+
+  // compute rowSum
+  for (uint d = 0; d < D; d++) {
+    gList = GetGList(d);
+    for (uint i = 0; i < gList.size( ); i++)
+      if (gList[i] > 0)
+        rowSum[i] += gList[i];
+  } // for
+
+  // each reduction vertex makes column
+  for (uint d = 0; d < D; d++) {
+    gList = GetGList(d);
+    for (uint i = 0; i < gList.size( ); i++)
+      if (gList[i] > 0) {
+        if (i % 2 == 0) // x pos
+          tripletList.push_back(Eigen::Triplet < double > (i, 2 * d, gList[i] / rowSum[i]));
+        else // y pos
+          tripletList.push_back(Eigen::Triplet < double > (i, 2 * d + 1, gList[i] / rowSum[i]));
+      } // if
+  } // for
+
+  qDebug( ) << "Done making triplets, #nonzero's:" << tripletList.size( );
+  U.setFromTriplets(tripletList.begin( ), tripletList.end( ));
+  this->U_T = U.transpose( );
+} // ComputeReductionMatrix
+
+void Sim2D::InitReductionVertices( ) {
+  this->reductionVertices.clear( );
+  this->reductionDist = vector <double> (m, 0);
+  for (uint i = 0; i < m; i++)
+    reductionDist[i] = Dist(0, i);
+  reductionVertices.push_back(0);
+} // InitReductionVertices
+
+bool Sim2D::AddReductionVertex( ) {
+  if (this->reductionVertices.size( ) == m)
+    return false;
+  if (this->reductionDist.size( ) != m) {
+    qDebug( ) << "reductionDist wrong size!";
+    return false;
+  } // if
+
+  uint newV = 0;
+  double maxD = reductionDist[0];
+  for (uint i = 0; i < m; i++) {
+    if (reductionDist[i] > maxD) {
+      maxD = reductionDist[i];
+      newV = i;
+    } // if
+  } // for
+
+  // update reductionDist:
+  for (uint i = 0; i < m; i++)
+    reductionDist[i] = min(reductionDist[i], Dist(newV, i));
+
+  reductionVertices.push_back(newV);
+  return true;
+} // AddReductionVertex
+
 
 // sets value of F_floor
 void Sim2D::ComputeFloorForce( ) {
@@ -186,6 +282,8 @@ void Sim2D::ComputeFloorForce( ) {
     F_floor(2 * i + 1) += f;
   } // for
 } // ComputeFloorForce
+
+
 
 VectorXd Sim2D::GetFrictionForce( ) {
   VectorXd Fwr = VectorXd::Zero(2 * m);
@@ -239,6 +337,13 @@ double Sim2D::MaxY( ) {
       ans = q(2 * i + 1);
   return ans;
 } // MaxY
+
+// returns distance between vertex a and b
+double Sim2D::Dist(uint a, uint b) {
+  double dx = q(2 * a) - q(2 * b);
+  double dy = q(2 * a + 1) - q(2 * b + 1);
+  return sqrt(dx*dx + dy*dy);
+} // Dist
 
 // returns y-pos of COM; sum of y_i * M_i,
 // y-pos of node times mass of node
@@ -698,6 +803,39 @@ void Sim2D::SetSpringForceConstant(double C) {
   InitLMatrix( );
 } // SetSpringForceConstant
 
+
+// computes reducted lMatrix and initializes solver
+void Sim2D::InitReductedlMatrix( ) {
+  qDebug( ) << "Init reducted lMatrix! ";
+
+  if (this->reductionVertices.size( ) == 0 || this->U.rows( ) == 0) {
+    qDebug( ) << "Can't init reducted matrix, because no U or smth";
+    return;
+  } // if
+
+  time_t t = clock( );
+
+
+  this->lMatrixReducted = U_T * (sublMatrix * U);
+
+  qDebug( ) << "Done after "
+            << 1000 * double(clock()-t)/CLOCKS_PER_SEC
+            << "ms, now cholenskySolver.analyzePattern(lMatrixReducted):";
+  t = clock( );
+
+  this->cholenskySolverReducted.analyzePattern(lMatrixReducted);
+
+  qDebug( ) << "Done after "
+            << 1000 * double(clock()-t)/CLOCKS_PER_SEC
+            << "ms, cholenskySolver.factorize(lMatrixReducted):";
+  t = clock( );
+
+  this->cholenskySolverReducted.factorize(lMatrixReducted); // now solver is ready to solve [lMatrix * x = b]
+  qDebug( ) << "Done with Cholensky decomp, comp time ="
+            << 1000 * double(clock()-t)/CLOCKS_PER_SEC
+            << "ms";
+} // InitReductedlMatrix
+
 // computes lMatrix and initializes solver
 void Sim2D::InitLMatrix( ) {
   qDebug( ) << "Init lMatrix! h =" << h
@@ -711,6 +849,8 @@ void Sim2D::InitLMatrix( ) {
   uint index;
   lMatrix = SparseMatrix<double> (2 * m + 2 * numConstraints, 2 * m + 2 * numConstraints); // left side
   sublMatrix = SparseMatrix<double> (2 * m , 2 * m); // left side
+  SparseMatrix <double> checkMat (2 * m, 2 * m);
+
   uint v1, v2; // indices of vertices
 
   uint sizeEst = pVec.size( ) * 8; // estimate of nr of nonzero elements in lMatrix
@@ -722,6 +862,15 @@ void Sim2D::InitLMatrix( ) {
   for (uint e = 0; e < pVec.size( ); e++) {
     v1 = pVec[e].v1;
     v2 = pVec[e].v2;
+
+    checkMat.coeffRef(2 * v1, 2 * v1) += 1 * pVec[e].w;
+    checkMat.coeffRef(2 * v1 + 1, 2 * v1 + 1) += 1 * pVec[e].w;
+    checkMat.coeffRef(2 * v2, 2 * v2) += 1 * pVec[e].w;
+    checkMat.coeffRef(2 * v2 + 1, 2 * v2 + 1) += 1 * pVec[e].w;
+    checkMat.coeffRef(2 * v1, 2 * v2) -= 1 * pVec[e].w;
+    checkMat.coeffRef(2 * v1 + 1, 2 * v2 + 1) -= 1 * pVec[e].w;
+    checkMat.coeffRef(2 * v2, 2 * v1) -= 1 * pVec[e].w;
+    checkMat.coeffRef(2 * v2 + 1, 2 * v1 + 1) -= 1 * pVec[e].w;
 
     // add w_i on diagonal, pos v1 and v2:
     tripletList.push_back(Eigen::Triplet<double>(2 * v1, 2 * v1, 1 * pVec[e].w));
@@ -764,6 +913,18 @@ void Sim2D::InitLMatrix( ) {
 
 
   sublMatrix += (1.0 / (h*h)) * this->M;
+  checkMat += (1.0 / (h*h)) * this->M;
+
+  // check:
+  SparseMatrix <double> diffMat = sublMatrix - checkMat;
+  double diffSum = 0; // difference between sublMatrix and checkMat
+  for (int k = 0; k < diffMat.outerSize( ); ++k) {
+    for (SparseMatrix<double>::InnerIterator it(diffMat, k); it; ++it) {
+      double val = it.value( );
+      diffSum += fabs(val);
+    } // for
+  } // for
+  qDebug( ) << "Diff:" << diffSum;
 
   for (uint i = 0; i < 2 * m; i++) {
     lMatrix.coeffRef(i, i) += (1.0 / (h*h)) * M.coeffRef(i, i);
@@ -773,6 +934,7 @@ void Sim2D::InitLMatrix( ) {
   // init cholenskysolver:
   qDebug( ) << "Done. now cholenskySolver.analyzePattern(lMatrix):";
   this->cholenskySolver.analyzePattern(lMatrix);
+  this->subCholenskySolver.analyzePattern(sublMatrix);
 
   qDebug( ) << "Done after "
             << 1000 * double(clock()-t)/CLOCKS_PER_SEC
@@ -780,6 +942,7 @@ void Sim2D::InitLMatrix( ) {
   t = clock( );
 
   this->cholenskySolver.factorize(lMatrix); // now solver is ready to solve [lMatrix * x = b]
+  this->subCholenskySolver.factorize(sublMatrix);
   qDebug( ) << "Done with Cholensky decomp, comp time ="
             << 1000 * double(clock()-t)/CLOCKS_PER_SEC
             << "ms, now cg.compute:";
@@ -792,6 +955,90 @@ void Sim2D::InitLMatrix( ) {
 } // InitLMatrix
 
 
+// 'normal' version of NextStepReducted, to see if this works
+void Sim2D::NextStepSimple( ) {
+  qDebug( ) << "Start nextstep simple";
+  // for measuring time
+  auto start = std::chrono::high_resolution_clock::now( );
+  auto elapsed = std::chrono::high_resolution_clock::now( ) - start;
+  long long microseconds;
+
+  if (simStep == 0) {
+    SetQ0( );
+    InitLMatrix( );
+  } // if
+
+  //VectorXd dQ; // difference
+  VectorXd oldQ = this->q; // q at start of NextStep
+  VectorXd sn = this->q + (h * this->v); // estimate of new q
+  VectorXd rAdd = (1.0 / (h*h)) * (this->M * sn); // add to right side
+  //rAdd -= sublMatrix * q0;
+  VectorXd rVec; // right side
+
+  for (uint step = 0; step < iterationsPerStep; step++) {
+    // compute right:
+    rVec = VectorXd::Zero(2 * m); // vector to solve
+    ComputePsAndAdd(rVec);
+    rVec += rAdd;
+    rVec *= -1;
+    rVec += sublMatrix * q;
+    //dQ = subCholenskySolver.solve(rVec);
+    //this->q = this->q0 + dQ;
+    VectorXd newQ = subCholenskySolver.solve(rVec);
+    this->q -= newQ;
+    //this->q = subCholenskySolver.solve(rVec);
+
+  } // for
+
+  elapsed = std::chrono::high_resolution_clock::now( ) - start;
+  microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count( );
+
+  qDebug( ) << "Done with simple next step after" << microseconds/1000 << "ms";
+
+  this->v = (1.0 / h) * (q - oldQ);
+  simStep++;
+  timeInSim += h;
+} // NextStepSimple
+
+// same as NextStep, but using reducted lMatrix
+void Sim2D::NextStepReducted( ) {
+  qDebug( ) << "Start nextstep reduced";
+  // for measuring time
+  auto start = std::chrono::high_resolution_clock::now( );
+  auto elapsed = std::chrono::high_resolution_clock::now( ) - start;
+  long long microseconds;
+
+  VectorXd oldQ = this->q; // q at start of NextStep
+  VectorXd dQ_reduct; // difference in q*
+
+  VectorXd sn = this->q + (h * this->v); // estimate of new q
+  VectorXd rAdd = (1.0 / (h*h)) * (this->M * sn); // add to right side
+  rAdd -= sublMatrix * q0;
+  VectorXd rVec, rVec_reduct; // right side and reducted right side
+
+  for (uint step = 0; step < iterationsPerStep; step++) {
+    // compute right:
+    rVec = VectorXd::Zero(2 * m); // vector to solve
+    ComputePsAndAdd(rVec);
+    rVec += rAdd;
+    // compute reducted right size
+    rVec_reduct = U_T * rVec;
+
+    dQ_reduct = cholenskySolverReducted.solve(rVec_reduct);
+
+    // now transform back to obtain 'real' q:
+    this->q = this->q0 + this->U * dQ_reduct;
+  } // for
+
+  elapsed = std::chrono::high_resolution_clock::now( ) - start;
+  microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count( );
+
+  qDebug( ) << "Done with reduction next step after" << microseconds/1000 << "ms";
+
+  this->v = (1.0 / h) * (q - oldQ);
+  simStep++;
+  timeInSim += h;
+} // NextStepReducted
 
 
 // updates q and v by using local/global solve
@@ -824,7 +1071,7 @@ void Sim2D::NextStep(bool useLLT, bool doMeasures) {
   auto elapsed = std::chrono::high_resolution_clock::now( ) - start;
   long long microseconds;
 
-  //ResetLockedVertices( ); // to make v and F zero for locked vertices
+
   ComputeFloorForce( );
 
   uint numConstraints = lockedVertices.size( );
@@ -845,27 +1092,14 @@ void Sim2D::NextStep(bool useLLT, bool doMeasures) {
   rightAdd.head(2 * m) = tempAdd;
 
   for (uint step = 0; step < numSteps; step++) {
-    // LOCAL: FIND pi's
-    //ComputePs( );
-
     // compute right:
     start = std::chrono::high_resolution_clock::now( );
-    //VectorXd rVector = VectorXd::Zero(2 * m); // right side
 
     rightVec = VectorXd::Zero(2 * m + 2 * numConstraints); // vector to solve
     ComputePsAndAdd(rightVec);
-//    for (uint i = 0; i < pVec.size( ); i++) {
-//      //pVec[i].AddToPosVec(rVector);
-//      pVec[i].AddToPosVec(rightVec);
-//    } // for
-
     rightVec += rightAdd;
     rightVec *= -1;
-
-    //tempAdd = sublMatrix * q;
     rightVec.head(2 * m) += sublMatrix * q;
-    //for (uint i = 0; i < 2 * m; i++)
-    //  rightVec(i) += tempAdd(i);
 
 
     elapsed = std::chrono::high_resolution_clock::now( ) - start;
@@ -873,30 +1107,17 @@ void Sim2D::NextStep(bool useLLT, bool doMeasures) {
     cur_rMatrixMakeTime += double(microseconds) / 1000;
 
     start = std::chrono::high_resolution_clock::now( );
-//    if (useLLT)
-//      q = this->cholenskySolver.solve(rVector);
-//    else
-//      q = this->cg.solve(rVector);
+
     if (useLLT)
       leftVec = this->cholenskySolver.solve(rightVec);
     else
       leftVec = this->cg.solve(rightVec);
 
     q -= leftVec.head(2 * m);
-//    for (uint i = 0; i < 2 * m; i++)
-//      q(i) -= leftVec(i);
-    //q = leftVec.head(2 * m);
 
     elapsed = std::chrono::high_resolution_clock::now( ) - start;
     microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count( );
     cur_qSolveTime += double(microseconds) / 1000;
-
-//    // reset locked vertices positions
-//    for (uint i = 0; i < lockedVertices.size( ); i++) {
-//      index = lockedVertices[i];
-//      q(2 * index) = oldQ(2 * index);
-//      q(2 * index + 1) = oldQ(2 * index + 1);
-//    } // for
 
     if (doMeasures) {
       VectorXd qDiff = q - prevQ;
@@ -909,11 +1130,8 @@ void Sim2D::NextStep(bool useLLT, bool doMeasures) {
     } // if
   } // for
 
-
-
   this->v = (1.0 / h) * (q - oldQ);
 
-  //ResetLockedVertices(false);
 
   cur_qSolveTime /= numSteps;
   cur_rMatrixMakeTime /= numSteps;
@@ -955,18 +1173,18 @@ void Sim2D::InitImgParams( ) {
   double maxX = MaxX( );
   double maxY = MaxY( );
 
-  qDebug( ) << "ImgParams, min/maxX =" << minX << maxX
-            << "min/maxY =" << minY << maxY;
+//  qDebug( ) << "ImgParams, min/maxX =" << minX << maxX
+//            << "min/maxY =" << minY << maxY;
 
   double W = maxX - minX;
   double H = maxY - minY;
   double L = max(W, H);
 
   // add border
-  minX -= L / 6;
-  minY -= L / 6;
-  maxX += L / 6;
-  maxY += L / 6;
+  minX -= L / 3;
+  minY -= L / 3;
+  maxX += L / 3;
+  maxY += L / 3;
   W = maxX - minX;
   H = maxY - minY;
   L = max(W, H);
@@ -976,6 +1194,219 @@ void Sim2D::InitImgParams( ) {
   this->imgViewSize = L;
 } // InitImgParams
 
+// returns number of neighbours of reduction node [index],
+// defined by nr of nodes having distance smaller than reductionMinG,
+// first arugment is number of neighbours, second is number of neighbours
+// that are themselves also reduction nodes
+pair <uint, uint> Sim2D::ReductionGetNumNeighbours(uint index) {
+  pair <uint, uint> ans;
+  ans = make_pair(0, 0);
+
+  if (reductionVertices.size( ) == 0)
+    return ans;
+
+  // count neighbours
+  for (uint i = 0; i < m; i++) {
+    if (i == reductionVertices[index])
+      continue;
+    double d = Dist(reductionVertices[index], i);
+    d *= d;
+    d /= reductSigma;
+    if (exp(-d) >= reductMinG) {
+      ans.first = ans.first + 1;
+      if (find(reductionVertices.begin( ), reductionVertices.end( ), i) != reductionVertices.end( ))
+        ans.second = ans.second + 1;
+    } // if
+  } // for
+  return ans;
+} // ReductionGetNumNeighbours
+
+// returns image of reducted mesh, shows reduction vertex [index]
+// and all nodes that lay inside the sphere of influence
+QImage Sim2D::ToReductRegionQImage(uint SIZE, uint index) {
+  QImage img = QImage(SIZE, SIZE, QImage::Format_RGB888);
+  QPainter painter(&img);
+  QPen pen;
+
+  painter.fillRect(0, 0, SIZE, SIZE, QColor(22, 22, 22));
+  painter.setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
+
+  if (imgViewSize == 0)
+    InitImgParams( );
+
+  if (index >= reductionVertices.size( ) || reductMinG == 0 || reductSigma == 0) {
+    qDebug( ) << "Can't make image! Because "
+              << "index >= reductionVertices.size( ) || reductMinG == 0 || reductSigma == 0";
+    return img;
+  } // if
+
+  double minX = imgCenterX - 0.5 * imgViewSize;
+  double minY = imgCenterY - 0.5 * imgViewSize;
+  double L = imgViewSize;
+
+  // compute positions in image
+  double x, y;
+  vector <double> sx, sy;
+  for (uint i = 0; i < m; i++) {
+    x = this->q(2 * i) - minX;
+    y = this->q(2 * i + 1) - minY;
+    x *= SIZE / L; // in [0, SIZE]
+    y *= SIZE / L; // in [0, SIZE]
+    sx.push_back(x);
+    sy.push_back(y);
+  } // for
+
+  // compute g(i,j) for nodes
+  // g(i,j) = exp(-d_ij^2/sigma)
+  vector <double> gVals;
+  for (uint i = 0; i < m; i++) {
+    double d = Dist(reductionVertices[index], i);
+    d *= d;
+    d /= reductSigma;
+    gVals.push_back(exp(-d));
+  } // for
+
+  // draw edges:
+  QColor col(122, 122, 122);
+  pen.setColor(col);
+  pen.setWidthF(0.45);
+  painter.setPen(pen);
+  uint v1, v2;
+  for (uint e = 0; e < numEdges; e++) {
+    v1 = E(e, 0);
+    v2 = E(e, 1);
+    painter.drawLine(QPointF(sx[v1], sy[v1]), QPointF(sx[v2], sy[v2]));
+  } // for
+
+  // draw vertices, distance color coded:
+  pen.setWidthF(0.275);
+  for (uint i = 0; i < m; i++) {
+    double d = gVals[i] * 255;
+    if (d < 0 || d > 255)
+      qDebug( ) << "Err! d =" << d;
+
+    QColor col(d / 10, d, d / 10);
+    pen.setColor(col);
+    painter.setPen(pen);
+    painter.setBrush(QBrush(col));
+    painter.drawEllipse(QPointF(sx[i], sy[i]), 1.125, 1.125);
+  } // for
+
+  // draw reduction nodes nodes, special color for selected node
+  for (uint i = 0; i < reductionVertices.size( ); i++) {
+    uint nr = reductionVertices[i];
+    QColor col(55, 55, 255);
+    if (i == index)
+      col = QColor(255, 15, 15);
+    pen.setColor(col);
+    painter.setPen(pen);
+    painter.setBrush(QBrush(col));
+    if (i == index)
+      painter.drawEllipse(QPointF(sx[nr], sy[nr]), 2.75, 2.75);
+    else
+      painter.drawEllipse(QPointF(sx[nr], sy[nr]), 1.75, 1.75);
+  } // for
+
+  // now draw circles around nodes that are in sphere of influence
+  painter.setBrush(Qt::NoBrush);
+  pen.setWidthF(0.475);
+  pen.setColor(QColor(240, 10, 40));
+  painter.setPen(pen);
+  for (uint i = 0; i < m; i++) {
+    if (gVals[i] >= reductMinG)
+      painter.drawEllipse(QPointF(sx[i], sy[i]), 3, 3);
+  } // for
+  return img;
+} // ToReductRegionQImage
+
+// shows mesh with reduction vertices highlighted, as well
+// as distance of each vertex to nearest reduction node
+QImage Sim2D::ToReductQImage(uint SIZE) {
+
+  QImage img = QImage(SIZE, SIZE, QImage::Format_RGB888);
+  QPainter painter(&img);
+  QPen pen;
+
+  painter.fillRect(0, 0, SIZE, SIZE, QColor(22, 22, 22));
+
+  painter.setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
+
+  if (imgViewSize == 0)
+    InitImgParams( );
+
+  double minX = imgCenterX - 0.5 * imgViewSize;
+  double minY = imgCenterY - 0.5 * imgViewSize;
+  double L = imgViewSize;
+  double maxDist = 1e-3;
+
+  for (uint i = 0; i < reductionDist.size( ); i++)
+    if (reductionDist[i] > maxDist)
+      maxDist = reductionDist[i];
+
+  // Debug( ) << "Making reduction image, maxDist =" << maxDist
+  //           << ", #vertices:" << reductionVertices.size( );
+
+  // compute positions in image
+  double x, y;
+  vector <double> sx, sy;
+
+  for (uint i = 0; i < m; i++) {
+    x = this->q(2 * i) - minX;
+    y = this->q(2 * i + 1) - minY;
+    x *= SIZE / L; // in [0, SIZE]
+    y *= SIZE / L; // in [0, SIZE]
+    sx.push_back(x);
+    sy.push_back(y);
+  } // for
+
+  // draw edges:
+  QColor col(122, 122, 122);
+  pen.setColor(col);
+  painter.setPen(pen);
+  pen.setWidthF(0.45);
+  painter.setPen(pen);
+
+  double cH, cL, cS;
+
+  uint v1, v2;
+  for (uint e = 0; e < numEdges; e++) {
+    v1 = E(e, 0);
+    v2 = E(e, 1);
+    painter.drawLine(QPointF(sx[v1], sy[v1]), QPointF(sx[v2], sy[v2]));
+  } // for
+
+  pen.setWidthF(0.275);
+  // draw nodes
+  for (uint i = 0; i < m; i++) {
+    double d = 0;
+    if (reductionDist.size( ) > 0)
+      d = (reductionDist[i] / maxDist);
+
+    cH = (1.0 - d);
+    cS = 1.0;
+    cL = d * 0.5;
+
+    QColor col;
+    col.setHslF(cH, cS, cL);
+
+    //QColor col(d * 255, 0, 0);
+    pen.setColor(col);
+    painter.setPen(pen);
+    painter.setBrush(QBrush(col));
+    painter.drawEllipse(QPointF(sx[i], sy[i]), 1.125, 1.125);
+  } // for
+
+  // draw reduction nodes nodes
+  for (uint i = 0; i < reductionVertices.size( ); i++) {
+    uint index = reductionVertices[i];
+    QColor col(55, 255, 55);
+    pen.setColor(col);
+    painter.setPen(pen);
+    painter.setBrush(QBrush(col));
+    painter.drawEllipse(QPointF(sx[index], sy[index]), 1.15, 1.15);
+  } // for
+  return img;
+} // ToReductQImage
 
 // returns SIZE * SIZE image
 QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
@@ -1077,6 +1508,12 @@ QImage Sim2D::ToQImage(uint SIZE, bool useAA, bool drawEdges,
     for (uint i = 0; i < m; i++) {
       valHans = (GetV(i) - minV) / vRange; // in [0 1]
 
+
+      if (valHans < 0)
+        valHans = 0;
+      if (valHans > 1)
+        valHans = 1;
+
       cH = (1.0 - valHans);
       cS = 1.0;
       cL = valHans * 0.5;
@@ -1172,6 +1609,58 @@ QImage Sim2D::GetlMatrixImage( ) {
   return img;
 } // GetlMatrixImage
 
+QImage Sim2D::GetUMatrixImage( ) {
+  qDebug( ) << "GetUMatrix, dimensions (r/c) =" << U.rows( ) << U.cols( );
+  uint SIZE = max(U.rows( ), U.cols( ));
+  QImage img = QImage(SIZE, SIZE, QImage::Format_RGB888);
+  QPainter painter(&img);
+  painter.fillRect(0, 0, SIZE, SIZE, Qt::black);
+
+  if (m == 0)
+    return img;
+
+  double maxVal = -1e99, minVal = 1e99, val;
+  uint nVals = 0;
+  double absSum = 0; // sum of elements
+
+  for (int k = 0; k < U.outerSize( ); ++k) {
+    for (SparseMatrix<double>::InnerIterator it(U, k); it; ++it) {
+      val = it.value( );
+      absSum += fabs(val);
+      nVals++;
+      if (val > maxVal)
+        maxVal = val;
+      if (val < minVal)
+        minVal = val;
+    } // for
+  } // for
+
+  double cv;
+  QColor c;
+
+  qDebug( ) << "GetUMatrix image, absSum =" << absSum
+            << "min/max val:" << minVal << maxVal
+            << "nVals:" << nVals;
+
+  for (int k = 0; k < U.outerSize( ); ++k) {
+    for (SparseMatrix<double>::InnerIterator it(U, k); it; ++it) {
+      val = it.value( );
+      if (val < 0) {
+        cv = 255 * fabs(val) / fabs(minVal);
+        cv = 255;
+        c = QColor(0, 0, cv);
+      } // if
+      else {
+        cv = 255 * fabs(val) / fabs(maxVal);
+        cv = 255;
+        c = QColor(cv, 0, 0);
+      } // if
+      img.setPixel(it.col( ), it.row( ), c.toRgb( ).rgb( ));
+    } // for
+  } // for
+  return img;
+} // GetUMatrixImage
+
 
 // puts all vertices in given range in vector [selectedVertices]
 // x1,x2,y1,y2 in range [0 1]
@@ -1213,126 +1702,6 @@ void Sim2D::AddLockedVertices( ) {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-Sim2D_Spring::Sim2D_Spring(uint _Nw, uint _Nl, double _width, double _len, double _mass) : Sim2D( ){
-  qDebug( ) << "Sim2D_Spring constructor";
-  this->h = 0.3;
-  this->m = _Nw * _Nl;
-  this->Nw = _Nw;
-  this->Nl = _Nl;
-
-  this->simStep = 0;
-  this->imgViewSize = 0;
-  this->timeInSim = 0;
-  this->gravRefHeight = 0;
-  this->minSpringLen = 1e99;
-
-  this->iterationsPerStep = 5;
-  this->springForceConstant = 2.5;
-  this->minSpringLen = 1e99;
-  this->meshMass = _mass;
-
-  this->q = VectorXd(2 * m);
-  this->v = VectorXd::Zero(2 * m);
-  this->F = VectorXd::Zero(2 * m);
-  this->F_floor = VectorXd::Zero(2 * m);
-  this->F_grav = VectorXd::Zero(2 * m);
-
-  qDebug( ) << "Sim2D_Spring constructor - init M matrices";
-  this->M = SparseMatrix <double>(2 * m, 2 * m);
-  this->Minv = SparseMatrix <double>(2 * m, 2 * m);
-
-  qDebug( ) << "Sim2D_Spring constructor - compute Minv";
-  for (uint i = 0; i < 2 * m; i++) {
-    if (i < Nw * 2) // bottom row, heavy nodes
-      M.coeffRef(i, i) = _mass / Nw;
-    else
-      M.coeffRef(i, i) = 1e-1 * _mass / m;
-    Minv.coeffRef(i, i) = 1.0 / M.coeffRef(i, i);
-  } // for
-
-  // lock top row
-  for (uint i = 0; i < Nw; i++)
-    this->lockedVertices.push_back(m - i - 1);
-
-
-  // init mesh:
-  qDebug( ) << "Sim2D_Spring constructor - init mesh";
-  double x, y;
-  uint index;
-  for (uint j = 0; j < Nl; j++) {
-    for (uint i = 0; i < Nw; i++) {
-      index = j * Nw + i;
-      if (index >= m)
-        qDebug( ) << "Error, index too large!";
-      x = _width * (double(i) / double(Nw-1)) - 0.5 * _width;
-      y = _len * (double(j) / double(Nl-1)) - 0.5 * _len;
-
-      this->q(2 * index)     = x;
-      this->q(2 * index + 1) = -y;
-    } // for
-  } // for
-
-  // now init edges
-  uint nE = Nl * (Nw - 1) + Nw * (Nl - 1); // number of edges
-
-  qDebug( ) << "Sim2D_Spring constructor - Init mesh, nE =" << nE;
-
-  this->E = MatrixXi(nE, 2);
-  this->numEdges = 0;
-
-  for (uint i = 0; i < m; i++) {
-    if ((i + 1) % Nw != 0) { // connect to vertex on right
-      E(numEdges, 0) = i;
-      E(numEdges, 1) = i + 1;
-      numEdges++;
-    } // if
-    if (i + Nw < m) { // connect to vertex below
-      E(numEdges, 0) = i;
-      E(numEdges, 1) = i + Nw;
-      numEdges++;
-    } // if
-  } // for
-
-  if (numEdges != nE) { // m not a square
-    qDebug( ) << "Error in InitMesh! numEdges =" << numEdges << "!=" << nE;
-    return;
-  } // if
-
-  double yCOM = this->GetCenterOfMassY( );
-  this->gravRefHeight = yCOM;
-
-  qDebug( ) << "Sim2D constructor - Init rest len";
-  InitRestLen( ); // compute rest lengths
-  qDebug( ) << "Sim2D constructor - Init Ps";
-  InitPs( ); // init pVec
-  qDebug( ) << "Sim2D constructor DONE";
-} // Sim2D_Spring
-
-
-// sets sprinForceConstant to C and also changes this
-// in pVec for all SpringPotentials by changing their weights
-void Sim2D_Spring::SetSpringForceConstant(double C) {
-  this->springForceConstant = C;
-  for (uint i = 0; i < pVec.size( ); i++) {
-    if (pVec[i].r0 < 0.0001)
-      qDebug( ) << "Smth wrong, r0 =" << pVec[i].r0;
-    pVec[i].w = C * 1.0 / pVec[i].r0;
-  } // for
-  // system matrix has changed, so recompute lMatrix:
-  InitLMatrix( );
-} // SetSpringForceConstant
 
 
 

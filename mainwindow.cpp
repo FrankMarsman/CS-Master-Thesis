@@ -11,6 +11,9 @@
 #include <QString>
 #include <cmath>
 #include <QVector>
+#include <random>
+#include <algorithm>
+#include <utility>
 
 #include <qcustomplot.h>
 
@@ -27,15 +30,19 @@
 using namespace Eigen;
 using namespace std;
 
+
+
 MainWindow::MainWindow(QWidget *parent) :
   QMainWindow(parent),
   ui(new Ui::MainWindow) {
   ui->setupUi(this);
 
+
   uint N = 30;
   double l = ui->meshSizeBox->value( );
   double mass = ui->meshMassBox->value( );
   this->sim = new Sim2D(N * N, mass, l);
+  this->IMAGE_SIZE = 700;
 
   ui->mBox->setValue(N);
 
@@ -57,6 +64,10 @@ MainWindow::MainWindow(QWidget *parent) :
   QObject::connect(ui->imgXBox, SIGNAL(valueChanged(double)), SLOT(UpdateImgParams( )));
   QObject::connect(ui->imgYBox, SIGNAL(valueChanged(double)), SLOT(UpdateImgParams( )));
   QObject::connect(ui->imgWBox, SIGNAL(valueChanged(double)), SLOT(UpdateImgParams( )));
+  // reduction related controls:
+  QObject::connect(ui->reductMinGVal, SIGNAL(valueChanged(double)), SLOT(UpdateReductionParams( )));
+  QObject::connect(ui->reductSigmaVal, SIGNAL(valueChanged(double)), SLOT(UpdateReductionParams( )));
+  QObject::connect(ui->reductSelectIndex, SIGNAL(valueChanged(int)), SLOT(UpdateReductionParams( )));
 
   QObject::connect(ui->imgScaleBox, SIGNAL(valueChanged(double)), SLOT(UpdateMeshImageInfo( )));
 
@@ -99,13 +110,15 @@ MainWindow::~MainWindow( ) {
 // runs a single step in simulation
 void MainWindow::on_stepButton_clicked( ) {
   if (this->sim->h != ui->hValSpinBox->value( )) {
+    qDebug( ) << "change h!";
     this->sim->h = ui->hValSpinBox->value( );
-
-    if (this->sim->simStep != 0) // because if so sim will init lMatrix anyway
-      this->sim->InitLMatrix( );
+    sim->InitLMatrix( );
+    sim->InitReductedlMatrix( );
+    //if (this->sim->simStep != 0) // because if so sim will init lMatrix anyway
+    //  this->sim->InitLMatrix( );
   } // if
 
-  bool useLLT = ui->lltBox->isChecked( );
+  //bool useLLT = ui->lltBox->isChecked( );
 
   this->sim->iterationsPerStep = ui->nStepsSpinBox->value( );
   // gravity:
@@ -116,10 +129,19 @@ void MainWindow::on_stepButton_clicked( ) {
 
   // spring constant:
   double C = ui->sfBox->value( ); // spring force constant
-  if (sim->springForceConstant != C)
+  if (sim->springForceConstant != C) {
+    qDebug( ) << "change C!";
     sim->SetSpringForceConstant(C);
+    sim->InitReductedlMatrix( );
+  } // if
 
-  this->sim->NextStep(useLLT);
+  uint nRuns = ui->runNBox->value( );
+  //this->sim->NextStepReducted( );
+
+  for (uint i = 0; i < nRuns; i++)
+    this->sim->NextStepSimple( );
+
+  //this->sim->NextStep(useLLT);
 
   UpdateMeshImage( );
   UpdateInfoText( );
@@ -420,11 +442,20 @@ void MainWindow::UpdateMeshImage( ) {
   bool drawLockedVertices = (ui->MainTab->currentIndex( ) == 0);
 
   uint DRAW_MODE = ui->drawModeBox->currentIndex( );
+  QImage img;
 
+  if (ui->MainTab->currentIndex( ) == 5) { // reduction tab
+    img = sim->ToReductQImage(IMAGE_SIZE);
+    ui->imgLabel->setPixmap(QPixmap::fromImage(img));
+    return;
+  } // if
 
-  //qDebug( ) << "UpdateMeshImage, DRAW_MODE =" << DRAW_MODE;
+  if (DRAW_MODE == 3) { // reduction mode chosen
+    img = sim->ToReductQImage(IMAGE_SIZE);
+  } // if
+  else
+    img = sim->ToQImage(IMAGE_SIZE, useAA, drawEdges, drawSelectedVertices, drawLockedVertices, DRAW_MODE);
 
-  QImage img = sim->ToQImage(700, useAA, drawEdges, drawSelectedVertices, drawLockedVertices, DRAW_MODE);
   ui->imgLabel->setPixmap(QPixmap::fromImage(img));
 } // UpdateMeshImage
 
@@ -593,6 +624,8 @@ void MainWindow::on_initButton_clicked( ) {
   bool useDSprings = ui->diagSpringCheckBox->isChecked( );
   m *= m; // make squared
 
+  ui->reductValBox->setMaximum(m);
+
   delete this->sim;
   this->sim = NULL;
 
@@ -620,10 +653,6 @@ void MainWindow::on_initButton_clicked( ) {
     ui->statusBar->showMessage("Mesh from image, m = " + QString::number(sim->m));
   } // if
 
-  if (mType == 2) { // spring
-    this->sim = new Sim2D_Spring(10, 50, 0.1, 1, mass);
-  } // if
-
   PerformInitDeform( );
 
   // gravity:
@@ -637,6 +666,8 @@ void MainWindow::on_initButton_clicked( ) {
 
   this->simFPS = 0;
 
+  on_resetImgButton_clicked( );
+  on_resetImgButton_clicked( );
   on_resetImgButton_clicked( );
 
   this->tVec.clear( );
@@ -762,6 +793,7 @@ void MainWindow::on_vNoiseButton_clicked( ) {
   this->sim->AddVNoise( );
 
   UpdateMeshImage( );
+  UpdateInfoText( );
 } // on_vNoiseButton_clicked
 
 
@@ -790,6 +822,11 @@ void MainWindow::on_copyMeshImgButton_clicked( ) {
   const QPixmap* pm = ui->imgLabel->pixmap( );
   QApplication::clipboard( )->setPixmap(*pm);
 } // on_copyMeshImgButton_clicked
+
+void MainWindow::on_copyMatImgButton_clicked( ) {
+  const QPixmap* pm = ui->lMatImgLabel->pixmap( );
+  QApplication::clipboard( )->setPixmap(*pm);
+} // on_copyMatImgButton_clicked
 
 // mesh type changed, if mesh type is from image, then show
 // image selection box
@@ -846,6 +883,52 @@ void MainWindow::on_updateLMatImg_clicked( ) {
 } // on_updateLMatImg_clicked
 
 
+// shows image of transformation matrix U
+void MainWindow::on_updateUMatImg_clicked( ) {
+  sim->ComputeReductionMatrix( );
+  sim->InitLMatrix( );
+  sim->InitReductedlMatrix( );
+  //sim->U = sim->U.transpose( ) * sim->U;
+  //sim->U = sim->lMatrixReducted;
+  QImage img = sim->GetUMatrixImage( );
+  ui->lMatImgLabel->setPixmap(QPixmap::fromImage(img).scaled(500, 500));
+} // on_updateUMatImg_clicked
+
+
+// selects reduction nodes and updates mesh image
+void MainWindow::on_reductButton_clicked( ) {
+  // init to 1 node:
+  sim->InitReductionVertices( );
+
+  uint m = min(sim->m, (uint) ui->reductValBox->value( ));
+  for (uint i = 1; i < m; i++)
+    sim->AddReductionVertex( );
+
+  sim->SetQ0( );
+
+
+  ui->reductSelectIndex->setMaximum(m - 1);
+
+  UpdateReductionParams( );
+} // on_reductButton_clicked
+
+// updates reduction parameters and redraws mesh
+void MainWindow::UpdateReductionParams( ) {
+  if (sim->reductionVertices.size( ) == 0)
+    return;
+
+  sim->reductMinG = ui->reductMinGVal->value( );
+  sim->reductSigma = ui->reductSigmaVal->value( );
+
+  uint index = ui->reductSelectIndex->value( );
+  pair <uint, uint> nn = sim->ReductionGetNumNeighbours(index);
+
+  ui->reductInfoLabel1->setText("Num neighbours = " + QString::number(nn.first));
+  ui->reductInfoLabel2->setText("Num selected neighbours = " + QString::number(nn.second));
+
+  QImage img = sim->ToReductRegionQImage(IMAGE_SIZE, index);
+  ui->imgLabel->setPixmap(QPixmap::fromImage(img));
+} // UpdateReductionParams
 
 
 

@@ -12,6 +12,7 @@
 #include <SparseCholesky>
 #include <omp.h>
 #include <QDebug>
+#include <utility>
 
 using namespace Eigen;
 using namespace std;
@@ -42,6 +43,7 @@ public:
 
   // fundamentals:
   VectorXd q; // position vector in R^2m
+  VectorXd q0; // original position vector in R^2m
   VectorXd v; // velocity vector in R^2m
   VectorXd F; // external forces
 
@@ -53,6 +55,7 @@ public:
   // solvers:
   ConjugateGradient < SparseMatrix < double >, Lower|Upper > cg; // solver for lMatrix
   SimplicialLDLT < SparseMatrix < double >, Lower|Upper > cholenskySolver;
+  SimplicialLDLT < SparseMatrix < double >, Lower|Upper > subCholenskySolver;
 
   // floor:
   bool floorEnabled; // do we have a floor?
@@ -72,6 +75,34 @@ public:
   vector < uint > selectedVertices; // list of selected vertices
   vector < uint > lockedVertices; // list of vertices that cannot move
 
+  //
+  // reduction functions and variables:
+  //
+
+  vector < uint > reductionVertices; // vertices to use for reduction
+  vector < double > reductionDist; // distance from reduction vertices
+  double reductSigma; // constant to compute 'distance' g(i,j)
+  double reductMinG; // g(i,j) = 0 if smaller than this (cutoff)
+  pair < uint, uint > ReductionGetNumNeighbours(uint index);
+
+  SparseMatrix < double > U; // transformation of reduction
+  SparseMatrix < double > U_T; // transpose of U
+  SparseMatrix < double > lMatrixReducted; // reducted constant system matrix
+
+  SimplicialLDLT < SparseMatrix < double >, Lower|Upper > cholenskySolverReducted;
+
+  vector < double > GetGList(uint index); // list of g_ij from index
+  void ComputeReductionMatrix( ); // computes U
+  void InitReductionVertices( );
+  void InitReductedlMatrix( ); // inits reduced lMatrix and solver
+  bool AddReductionVertex( );
+
+  void NextStepReducted( );
+
+  //
+  //
+  //
+
   double imgCenterX, imgCenterY; // position of center of QImage
   double imgViewSize; // how large is area inside image
 
@@ -85,6 +116,8 @@ public:
   double MinY( );
   double MaxX( );
   double MaxY( );
+
+  double Dist(uint a, uint b);
 
   double GetCenterOfMassY( ); // returns y-pos of COM
   double GetCenterOfMassX( ); // returns x-pos of COM
@@ -114,12 +147,15 @@ public:
   void ComputePsAndAdd(VectorXd & rv); // computes auxilliary variables and adds to rVec
   void InitLMatrix( );
 
+  // short functions:
+  void SetQ0( ) {this->q0 = this->q;} // sets q0 to current value of q
+
   double gravAcc; // gravitational acceleration
   double gravRefHeight; // measure Gravitational energy from this height
   VectorXd F_grav; // gravitational force
 
   void SetGravity(double g); // sets F with gravity and updates gravAcc
-  virtual void SetSpringForceConstant(double C); // updates springForceConstant (also in pVec)
+  void SetSpringForceConstant(double C); // updates springForceConstant (also in pVec)
 
   void SetSelectedVertices(double x1, double x2, double y1, double y2);
   void AddLockedVertices( );
@@ -135,37 +171,23 @@ public:
   void SqueezeY(double factor = 0.9); // squeezes mesh in y-direction by factor
 
   void NextStep(bool useLLT = false, bool doMeasures = false); // compute next q
+  void NextStepSimple( ); // similar to reduced, to check
 
   QImage ToQImage(uint SIZE, bool useAA = true, bool drawEdges = true,
                   bool drawSelectedVertices = false, bool drawLockedVertices = false,
                   uint DRAW_MODE = 0);
 
+  QImage ToReductQImage(uint SIZE);
+  QImage ToReductRegionQImage(uint SIZE, uint index);
+
   QImage GetlMatrixImage( ); // converts lMatrix to image
+  QImage GetUMatrixImage( ); // converts U to image
 
   Sim2D(uint _m, double _meshMass = 1, double _meshSize = 1, bool dSprings = true);
   Sim2D(QImage img, double _meshMass = 1, double _meshSize = 1, bool dSprings = true);
   Sim2D( );
   ~Sim2D( );
 };
-
-
-// Sim2D object containing a spring
-class Sim2D_Spring : public Sim2D {
-public:
-  uint Nw, Nl; // number of nodes in width and length
-
-  virtual void SetSpringForceConstant(double C); // updates springForceConstant (also in pVec)
-
-  Sim2D_Spring(uint _Nw, uint _Nl, double _width, double _len, double _mass);
-  ~Sim2D_Spring( ) {qDebug( ) << "Bye";}
-}; // Sim2D_Spring
-
-
-
-
-
-
-
 
 
 

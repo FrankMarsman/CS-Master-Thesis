@@ -7,6 +7,8 @@
 #include <QVector>
 #include <QPen>
 #include <QMouseEvent>
+#include <QObject>
+#include <QEvent>
 
 namespace Ui {
 class MainWindow;
@@ -19,6 +21,8 @@ class MainWindow : public QMainWindow
 public:
   Sim2D * sim;
   bool isRunning; // true if NextStep is called continuously
+
+  uint IMAGE_SIZE; // size of main image
 
   double simFPS; // how many times NextStep per sec
 
@@ -36,23 +40,25 @@ public:
   QVector <QString> yVecLabels; // for legend
   QVector <QPen> yVecPens; // pen for each line
 
+
   explicit MainWindow(QWidget *parent = 0);
   ~MainWindow( );
 
 public slots:
   void Run( );
+
   void UpdateInfoText( ); // updates information on ui
   void UpdateMeshImage( ); // prints mesh to ui
   void UpdateSelectedVertices( );
-  void PerformInitDeform( );
-
   void UpdateStepPlot( );
   void UpdateFloor(bool redraw = true);
   void UpdateImgParams( );
   void UpdateMeshImageInfo( );
+  void UpdateReductionParams( );
 
   void RunExperiment( );
 
+  void PerformInitDeform( );
 
 
 private slots:
@@ -90,6 +96,12 @@ private slots:
   void on_chooseMeshFileButton_clicked();
 
   void on_updateLMatImg_clicked();
+
+  void on_reductButton_clicked();
+
+  void on_updateUMatImg_clicked();
+
+  void on_copyMatImgButton_clicked();
 
 private:
   Ui::MainWindow *ui;

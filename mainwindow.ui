@@ -19,7 +19,7 @@
      <widget class="QTabWidget" name="MainTab">
       <property name="maximumSize">
        <size>
-        <width>250</width>
+        <width>300</width>
         <height>16777215</height>
        </size>
       </property>
@@ -30,7 +30,7 @@
        <enum>QTabWidget::Rounded</enum>
       </property>
       <property name="currentIndex">
-       <number>2</number>
+       <number>0</number>
       </property>
       <widget class="QWidget" name="SimTab">
        <attribute name="title">
@@ -48,11 +48,34 @@
          </widget>
         </item>
         <item>
-         <widget class="QPushButton" name="stepButton">
-          <property name="text">
-           <string>Single step</string>
-          </property>
-         </widget>
+         <layout class="QHBoxLayout" name="horizontalLayout_8">
+          <item>
+           <widget class="QSpinBox" name="runNBox">
+            <property name="maximumSize">
+             <size>
+              <width>100</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="prefix">
+             <string>n = </string>
+            </property>
+            <property name="minimum">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <number>100000</number>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="stepButton">
+            <property name="text">
+             <string>Run n steps</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
         </item>
         <item>
          <widget class="QGroupBox" name="groupBox_5">
@@ -85,7 +108,7 @@
               <number>9999</number>
              </property>
              <property name="value">
-              <number>10</number>
+              <number>1</number>
              </property>
             </widget>
            </item>
@@ -415,6 +438,11 @@ hasnds</string>
              <string>Spring stress</string>
             </property>
            </item>
+           <item>
+            <property name="text">
+             <string>Reduction</string>
+            </property>
+           </item>
           </widget>
          </item>
          <item>
@@ -525,7 +553,7 @@ hasnds</string>
           <item>
            <widget class="QComboBox" name="meshTypeBox">
             <property name="currentIndex">
-             <number>0</number>
+             <number>1</number>
             </property>
             <item>
              <property name="text">
@@ -535,11 +563,6 @@ hasnds</string>
             <item>
              <property name="text">
               <string>Mesh from image</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Spring</string>
              </property>
             </item>
            </widget>
@@ -562,7 +585,11 @@ hasnds</string>
               </widget>
              </item>
              <item>
-              <widget class="QLineEdit" name="meshFileEdit"/>
+              <widget class="QLineEdit" name="meshFileEdit">
+               <property name="text">
+                <string>C:/Users/Frank/Desktop/0A0A.png</string>
+               </property>
+              </widget>
              </item>
              <item>
               <widget class="QPushButton" name="chooseMeshFileButton">
@@ -588,7 +615,7 @@ hasnds</string>
               <double>0.100000000000000</double>
              </property>
              <property name="maximum">
-              <double>10.000000000000000</double>
+              <double>100.000000000000000</double>
              </property>
              <property name="singleStep">
               <double>0.100000000000000</double>
@@ -642,13 +669,13 @@ hasnds</string>
            <double>0.010000000000000</double>
           </property>
           <property name="maximum">
-           <double>100.000000000000000</double>
+           <double>1000.000000000000000</double>
           </property>
           <property name="singleStep">
            <double>0.010000000000000</double>
           </property>
           <property name="value">
-           <double>1.000000000000000</double>
+           <double>10.000000000000000</double>
           </property>
          </widget>
         </item>
@@ -691,10 +718,10 @@ hasnds</string>
         <item>
          <widget class="QComboBox" name="initActionBox">
           <property name="currentText">
-           <string>Lock bottom vertices</string>
+           <string>Do nothing</string>
           </property>
           <property name="currentIndex">
-           <number>1</number>
+           <number>0</number>
           </property>
           <item>
            <property name="text">
@@ -1053,6 +1080,133 @@ hasnds</string>
         </item>
        </layout>
       </widget>
+      <widget class="QWidget" name="REDUTTAB">
+       <attribute name="title">
+        <string>Reduction</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="verticalLayout_16">
+        <item>
+         <layout class="QHBoxLayout" name="aaaa">
+          <item>
+           <widget class="QSpinBox" name="reductValBox">
+            <property name="prefix">
+             <string>#nodes = </string>
+            </property>
+            <property name="minimum">
+             <number>1</number>
+            </property>
+            <property name="maximum">
+             <number>100000</number>
+            </property>
+            <property name="value">
+             <number>250</number>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="reductButton">
+            <property name="text">
+             <string>Reduction</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="AAGROUP">
+          <property name="title">
+           <string>Settings</string>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_15">
+           <item>
+            <widget class="QDoubleSpinBox" name="reductSigmaVal">
+             <property name="prefix">
+              <string>σ = </string>
+             </property>
+             <property name="decimals">
+              <number>3</number>
+             </property>
+             <property name="minimum">
+              <double>0.010000000000000</double>
+             </property>
+             <property name="singleStep">
+              <double>0.010000000000000</double>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QDoubleSpinBox" name="reductMinGVal">
+             <property name="prefix">
+              <string>min g = </string>
+             </property>
+             <property name="decimals">
+              <number>4</number>
+             </property>
+             <property name="minimum">
+              <double>0.000100000000000</double>
+             </property>
+             <property name="singleStep">
+              <double>0.000100000000000</double>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QSpinBox" name="reductSelectIndex">
+             <property name="suffix">
+              <string/>
+             </property>
+             <property name="prefix">
+              <string>Selected node: </string>
+             </property>
+             <property name="maximum">
+              <number>200000</number>
+             </property>
+             <property name="value">
+              <number>0</number>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QGroupBox" name="groupBox_7">
+             <property name="title">
+              <string>Info about selected node</string>
+             </property>
+             <layout class="QVBoxLayout" name="verticalLayout_17">
+              <item>
+               <widget class="QLabel" name="reductInfoLabel1">
+                <property name="text">
+                 <string>TextLabel</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="reductInfoLabel2">
+                <property name="text">
+                 <string>TextLabel</string>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <spacer name="verticalSpacer_5">
+          <property name="orientation">
+           <enum>Qt::Vertical</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>20</width>
+            <height>40</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </widget>
      </widget>
     </item>
     <item>
@@ -1213,17 +1367,48 @@ background-color: rgb(255, 170, 0);</string>
        </attribute>
        <layout class="QVBoxLayout" name="verticalLayout_12">
         <item>
-         <widget class="QPushButton" name="updateLMatImg">
-          <property name="maximumSize">
-           <size>
-            <width>200</width>
-            <height>16777215</height>
-           </size>
-          </property>
-          <property name="text">
-           <string>Show lMatrix image</string>
-          </property>
-         </widget>
+         <layout class="QHBoxLayout" name="horizontalLayout_6">
+          <item>
+           <widget class="QPushButton" name="updateUMatImg">
+            <property name="text">
+             <string>Show U matrix image</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="updateLMatImg">
+            <property name="maximumSize">
+             <size>
+              <width>200</width>
+              <height>16777215</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>Show lMatrix image</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="copyMatImgButton">
+            <property name="text">
+             <string>Copy image to clipboard</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
         </item>
         <item>
          <widget class="QLabel" name="lMatImgLabel">
@@ -1249,6 +1434,19 @@ background-color: rgb(255, 170, 0);</string>
            <set>Qt::AlignCenter</set>
           </property>
          </widget>
+        </item>
+        <item>
+         <spacer name="verticalSpacer_6">
+          <property name="orientation">
+           <enum>Qt::Vertical</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>20</width>
+            <height>40</height>
+           </size>
+          </property>
+         </spacer>
         </item>
        </layout>
       </widget>
