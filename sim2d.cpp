@@ -849,7 +849,7 @@ void Sim2D::InitLMatrix( ) {
   uint index;
   lMatrix = SparseMatrix<double> (2 * m + 2 * numConstraints, 2 * m + 2 * numConstraints); // left side
   sublMatrix = SparseMatrix<double> (2 * m , 2 * m); // left side
-  SparseMatrix <double> checkMat (2 * m, 2 * m);
+  //SparseMatrix <double> checkMat (2 * m, 2 * m);
 
   uint v1, v2; // indices of vertices
 
@@ -863,14 +863,14 @@ void Sim2D::InitLMatrix( ) {
     v1 = pVec[e].v1;
     v2 = pVec[e].v2;
 
-    checkMat.coeffRef(2 * v1, 2 * v1) += 1 * pVec[e].w;
-    checkMat.coeffRef(2 * v1 + 1, 2 * v1 + 1) += 1 * pVec[e].w;
-    checkMat.coeffRef(2 * v2, 2 * v2) += 1 * pVec[e].w;
-    checkMat.coeffRef(2 * v2 + 1, 2 * v2 + 1) += 1 * pVec[e].w;
-    checkMat.coeffRef(2 * v1, 2 * v2) -= 1 * pVec[e].w;
-    checkMat.coeffRef(2 * v1 + 1, 2 * v2 + 1) -= 1 * pVec[e].w;
-    checkMat.coeffRef(2 * v2, 2 * v1) -= 1 * pVec[e].w;
-    checkMat.coeffRef(2 * v2 + 1, 2 * v1 + 1) -= 1 * pVec[e].w;
+//    checkMat.coeffRef(2 * v1, 2 * v1) += 1 * pVec[e].w;
+//    checkMat.coeffRef(2 * v1 + 1, 2 * v1 + 1) += 1 * pVec[e].w;
+//    checkMat.coeffRef(2 * v2, 2 * v2) += 1 * pVec[e].w;
+//    checkMat.coeffRef(2 * v2 + 1, 2 * v2 + 1) += 1 * pVec[e].w;
+//    checkMat.coeffRef(2 * v1, 2 * v2) -= 1 * pVec[e].w;
+//    checkMat.coeffRef(2 * v1 + 1, 2 * v2 + 1) -= 1 * pVec[e].w;
+//    checkMat.coeffRef(2 * v2, 2 * v1) -= 1 * pVec[e].w;
+//    checkMat.coeffRef(2 * v2 + 1, 2 * v1 + 1) -= 1 * pVec[e].w;
 
     // add w_i on diagonal, pos v1 and v2:
     tripletList.push_back(Eigen::Triplet<double>(2 * v1, 2 * v1, 1 * pVec[e].w));
@@ -913,18 +913,18 @@ void Sim2D::InitLMatrix( ) {
 
 
   sublMatrix += (1.0 / (h*h)) * this->M;
-  checkMat += (1.0 / (h*h)) * this->M;
+  //checkMat += (1.0 / (h*h)) * this->M;
 
-  // check:
-  SparseMatrix <double> diffMat = sublMatrix - checkMat;
-  double diffSum = 0; // difference between sublMatrix and checkMat
-  for (int k = 0; k < diffMat.outerSize( ); ++k) {
-    for (SparseMatrix<double>::InnerIterator it(diffMat, k); it; ++it) {
-      double val = it.value( );
-      diffSum += fabs(val);
-    } // for
-  } // for
-  qDebug( ) << "Diff:" << diffSum;
+//  // check:
+//  SparseMatrix <double> diffMat = sublMatrix - checkMat;
+//  double diffSum = 0; // difference between sublMatrix and checkMat
+//  for (int k = 0; k < diffMat.outerSize( ); ++k) {
+//    for (SparseMatrix<double>::InnerIterator it(diffMat, k); it; ++it) {
+//      double val = it.value( );
+//      diffSum += fabs(val);
+//    } // for
+//  } // for
+//  qDebug( ) << "Diff:" << diffSum;
 
   for (uint i = 0; i < 2 * m; i++) {
     lMatrix.coeffRef(i, i) += (1.0 / (h*h)) * M.coeffRef(i, i);
@@ -948,7 +948,7 @@ void Sim2D::InitLMatrix( ) {
             << "ms, now cg.compute:";
   t = clock( );
   // init other solver
-  this->cg.compute(lMatrix); // now solver is ready to solve [lMatrix * x = b]
+  this->cg.compute(sublMatrix); // now solver is ready to solve [lMatrix * x = b]
   qDebug( ) << "Done . comp time ="
             << 1000 * double(clock()-t)/CLOCKS_PER_SEC
             << "ms";
@@ -963,16 +963,13 @@ void Sim2D::NextStepSimple( ) {
   auto elapsed = std::chrono::high_resolution_clock::now( ) - start;
   long long microseconds;
 
-  if (simStep == 0) {
-    SetQ0( );
+  if (simStep == 0)
     InitLMatrix( );
-  } // if
 
   //VectorXd dQ; // difference
   VectorXd oldQ = this->q; // q at start of NextStep
   VectorXd sn = this->q + (h * this->v); // estimate of new q
   VectorXd rAdd = (1.0 / (h*h)) * (this->M * sn); // add to right side
-  //rAdd -= sublMatrix * q0;
   VectorXd rVec; // right side
 
   for (uint step = 0; step < iterationsPerStep; step++) {
@@ -980,14 +977,8 @@ void Sim2D::NextStepSimple( ) {
     rVec = VectorXd::Zero(2 * m); // vector to solve
     ComputePsAndAdd(rVec);
     rVec += rAdd;
-    rVec *= -1;
-    rVec += sublMatrix * q;
-    //dQ = subCholenskySolver.solve(rVec);
-    //this->q = this->q0 + dQ;
-    VectorXd newQ = subCholenskySolver.solve(rVec);
-    this->q -= newQ;
-    //this->q = subCholenskySolver.solve(rVec);
 
+    q = cg.solve(rVec);
   } // for
 
   elapsed = std::chrono::high_resolution_clock::now( ) - start;
@@ -1002,38 +993,55 @@ void Sim2D::NextStepSimple( ) {
 
 // same as NextStep, but using reducted lMatrix
 void Sim2D::NextStepReducted( ) {
-  qDebug( ) << "Start nextstep reduced";
+  qDebug( ) << "Start nextstep reduct";
   // for measuring time
   auto start = std::chrono::high_resolution_clock::now( );
   auto elapsed = std::chrono::high_resolution_clock::now( ) - start;
   long long microseconds;
 
-  VectorXd oldQ = this->q; // q at start of NextStep
-  VectorXd dQ_reduct; // difference in q*
+  if (simStep == 0) {
+    InitLMatrix( );
+    InitReductedlMatrix( );
+  } // if
 
+  //VectorXd dQ; // difference
+  VectorXd oldQ = this->q; // q at start of NextStep
+  VectorXd dQ, dQ_reduct;
   VectorXd sn = this->q + (h * this->v); // estimate of new q
   VectorXd rAdd = (1.0 / (h*h)) * (this->M * sn); // add to right side
-  rAdd -= sublMatrix * q0;
-  VectorXd rVec, rVec_reduct; // right side and reducted right side
+  VectorXd rVec, rVec_reduct; // right side
 
   for (uint step = 0; step < iterationsPerStep; step++) {
     // compute right:
     rVec = VectorXd::Zero(2 * m); // vector to solve
     ComputePsAndAdd(rVec);
     rVec += rAdd;
-    // compute reducted right size
+    rVec *= -1;
+    //rVec += sublMatrix * q;
     rVec_reduct = U_T * rVec;
+    rVec_reduct -= lMatrixReducted * (U_T * q);
 
+    // solve dQ and update q:
     dQ_reduct = cholenskySolverReducted.solve(rVec_reduct);
 
-    // now transform back to obtain 'real' q:
-    this->q = this->q0 + this->U * dQ_reduct;
+    // CHECK DIFF - START
+    VectorXd dVec = (lMatrixReducted * dQ_reduct) - rVec_reduct;
+    double dSum = 0;
+    for (int i = 0; i < dVec.rows( ); i++)
+      dSum += fabs(dVec(i));
+    dSum /= dVec.rows( );
+    qDebug( ) << " - * --- * - dSum =" << dSum;
+    // CHECK DIFF - END
+
+    dQ = U * dQ_reduct;
+
+    this->q -= dQ;
   } // for
 
   elapsed = std::chrono::high_resolution_clock::now( ) - start;
   microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count( );
 
-  qDebug( ) << "Done with reduction next step after" << microseconds/1000 << "ms";
+  qDebug( ) << "Done with reduct next step after" << microseconds/1000 << "ms";
 
   this->v = (1.0 / h) * (q - oldQ);
   simStep++;

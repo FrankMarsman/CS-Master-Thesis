@@ -136,10 +136,10 @@ void MainWindow::on_stepButton_clicked( ) {
   } // if
 
   uint nRuns = ui->runNBox->value( );
-  //this->sim->NextStepReducted( );
 
   for (uint i = 0; i < nRuns; i++)
     this->sim->NextStepSimple( );
+    //this->sim->NextStepReducted( );
 
   //this->sim->NextStep(useLLT);
 
